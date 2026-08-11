@@ -1,0 +1,96 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <plugin filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+        <render_engine>ogre2</render_engine>
+    </plugin>
+
+
+    <!-- Fixed mount point on the chassis -->
+    <joint name="camera_mount_joint" type="fixed">
+        <parent link="chassis" />
+        <child link="camera_mount_link" />
+
+        <origin
+            xyz="-${camera_offset} 0 ${camera_elevation}"
+            rpy="0 0 ${pi}" />
+    </joint>
+
+
+    <!-- Invisible pivot link -->
+    <link name="camera_mount_link" />
+
+
+    <!-- Camera rotates around the bottom of the camera -->
+    <joint name="camera_joint" type="fixed">
+        <parent link="camera_mount_link" />
+        <child link="camera_link" />
+
+        <!-- Move from bottom of camera to its center -->
+        <origin
+            xyz="0 0 ${camera_height}"
+            rpy="0 ${camera_pitch} 0" />
+    </joint>
+
+
+    <link name="camera_link">
+
+        <visual>
+            <geometry>
+                <box size="${camera_width} ${camera_length} ${camera_height}" />
+            </geometry>
+            <material name="black" />
+        </visual>
+
+        <collision>
+            <geometry>
+                <box size="${camera_width} ${camera_length} ${camera_height}" />
+            </geometry>
+        </collision>
+
+        <xacro:inertial_box
+            mass="${camera_mass}"
+            x="${camera_length}"
+            y="${camera_width}"
+            z="${camera_height}">
+
+            <origin xyz="0 0 0" rpy="0 0 0" />
+        </xacro:inertial_box>
+
+    </link>
+
+
+    <gazebo reference="camera_link">
+        <material>Gazebo/Black</material>
+
+        <sensor name="camera_sensor" type="camera">
+
+            <pose>0 0 0 0 0 0</pose>
+
+            <camera>
+                <horizontal_fov>2.09</horizontal_fov>
+
+                <image>
+                    <width>${image_width}</width>
+                    <height>${image_height}</height>
+                    <format>${image_format}</format>
+                </image>
+
+                <clip>
+                    <near>0.01</near>
+                    <far>1000</far>
+                </clip>
+
+                <camera_info_topic>${info_topic}</camera_info_topic>
+            </camera>
+
+            <always_on>true</always_on>
+            <update_rate>${camera_fps}</update_rate>
+            <visualize>true</visualize>
+            <topic>${image_topic}</topic>
+
+        </sensor>
+    </gazebo>
+
+</robot>

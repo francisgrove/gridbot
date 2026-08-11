@@ -1,0 +1,82 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="robot">
+
+    <xacro:include filename="inertial_macros.xacro" />
+
+    <!-- Robot body -->
+    <xacro:property name="chassis_radius" value="0.055" />
+    <xacro:property name="chassis_height" value="0.042" />
+    <xacro:property name="chassis_elevation" value="0.015" />
+    <xacro:property name="chassis_mass" value="0.3" />
+
+    <!-- Robot wheels-->
+    <!-- wheel_offset - how far, from the back, the wheel centre should be -->
+    <xacro:property name="wheel_radius" value="0.02" />
+    <xacro:property name="wheel_length" value="0.02" />
+    <xacro:property name="wheel_mass" value="0.025" />
+
+    <!-- Caster wheel -->
+    <xacro:property name="caster_offset" value="0.05" />
+    <xacro:property name="caster_radius" value="0.005" />
+    <xacro:property name="caster_mass" value="0.01" />
+
+    <!-- Camera sensor -->
+    <xacro:property name="image_topic" value="camera/image_raw" />
+    <xacro:property name="info_topic" value="camera/camera_info" />
+    <xacro:property name="camera_fps" value="30" />
+    <xacro:property name="image_width" value="1280" />
+    <xacro:property name="image_height" value="720" />
+    <xacro:property name="image_format" value="R8G8B8" />
+
+    <!-- Camera physical properties -->
+    <xacro:property name="camera_elevation" value="0.04" />
+    <xacro:property name="camera_offset" value="0.0525" />
+    <xacro:property name="camera_width" value="0.01" />
+    <xacro:property name="camera_length" value="0.025" />
+    <xacro:property name="camera_height" value="0.024" />
+    <xacro:property name="camera_mass" value="0.01" />
+    <xacro:property name="camera_pitch" value="${pi/4}" />
+
+    <!-- Color  -->
+    <xacro:property name="color_blue" value="0.0 0.0 0.5 1.0" />      <!-- blue -->
+    <xacro:property name="color_yellow" value="1.0 1.0 0.0 1.0" />   <!-- yellow -->
+    <xacro:property name="color_green" value="0.0 1.0 0.0 1.0" />  <!-- green -->
+    <xacro:property name="color_gray" value="0.2 0.2 0.2 1.0" />       <!-- dark grey -->
+    <xacro:property name="color_black" value="0.0 0.0 0.0 1.0" />       <!-- black -->
+
+
+    <material name="blue">
+        <color rgba="${color_blue}" />
+    </material>
+
+    <material name="yellow">
+        <color rgba="${color_yellow}" />
+    </material>
+
+    <material name="green">
+        <color rgba="${color_green}" />
+    </material>
+
+    <material name="gray">
+        <color rgba="${color_gray}" />
+    </material>
+
+
+    <material name="black">
+        <color rgba="${color_black}" />
+    </material>
+
+
+    <!-- Calculations -->
+     <!--     <xacro:property name="wheel_separation" value="${chassis_radius*2 + wheel_length}" /> -->
+    <xacro:property name="wheel_separation" value="${0.07+wheel_radius}" />
+
+
+
+    <xacro:include filename="gazebo_control.xacro" />
+
+    <xacro:include filename="robot_core.xacro" />
+
+    <!-- <xacro:include filename="ros2_control.xacro" /> -->
+    <xacro:include filename="camera.xacro" />
+</robot>

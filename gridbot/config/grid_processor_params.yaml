@@ -1,0 +1,25 @@
+/gridbot/grid_processor:
+  ros__parameters:
+    camera_topic: "camera/image_raw/compressed"
+    line_offset_topic: "line_offset"
+    tracked_image_topic: "camera/image_tracked/compressed"
+    aruco_topic: "aruco"
+    line_turning_topic: "line_turning"
+
+    line_color: [193,1,0]
+
+    line_roi_height: 0.6
+    center_line_roi_width: 0.2
+    sides_line_roi_width: 0.3
+
+    aruco_roi_width: 0.5
+    aruco_roi_height: 0.8
+
+    line_turning_threshold: 0.5
+
+    aruco_padding: 25
+    
+    midline_step: 30
+    followed_node_offset: 3
+
+    prepare_tracked_image: true

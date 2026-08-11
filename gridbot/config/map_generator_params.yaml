@@ -1,0 +1,52 @@
+/gridbot/map_generator:
+  ros__parameters:
+    yaml_save_path: "ros2_ws/src/gridbot/config/map_graph.yaml"
+    img_save_path: "ros2_ws/src/gridbot/sim_assets/models/grid/map_grid.png"
+    img_width: 4096
+    img_height: 4096
+    tag_size: 30
+    text_size: 25
+    line_color: [0, 0, 255]
+    line_length: 100
+    line_thickness: 4
+
+    graph_width: 4
+    graph_height: 3
+
+    removed_nodes:
+      - "B1"
+      - "C3"
+      - "D2"
+
+    edges:
+      # Horizontal
+      # Row 1
+      - "A1,B1,6"
+      - "B1,C1,3"
+      - "C1,D1,8"
+
+      # Row 2
+      - "A2,B2,4"
+      - "B2,C2,9"
+      - "C2,D2,2"
+
+      # Row 3
+      - "A3,B3,5"
+      - "B3,D3,8"
+      
+      # Vertical
+      # Column A
+      - "A1,A2,3"
+      - "A2,A3,5"
+
+      # Column B
+      - "B1,B2,7"
+      - "B2,B3,2"
+
+      # Column C
+      - "C1,C2,5"
+      - "C2,C3,6"
+
+      # Column D
+      - "D1,D2,4"
+      - "D2,D3,9"

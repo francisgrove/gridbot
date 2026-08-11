@@ -1,0 +1,20 @@
+/gridbot/motor_driver:
+  ros__parameters:
+    twist_topic: "cmd_vel"
+
+    left_enable_pin: 6
+    left_forward_pin: 12
+    left_backward_pin: 13
+
+    right_enable_pin: 26
+    right_forward_pin: 20
+    right_backward_pin: 21
+
+    wheel_radius: 2.0
+    wheel_separation: 7.0
+
+    max_linear_vel: 1.5
+    max_angular_vel: 30.0
+
+    max_rpm: 600
+    frequency: 500
