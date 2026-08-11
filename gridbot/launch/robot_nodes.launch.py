@@ -36,6 +36,6 @@ def generate_launch_description():
     return LaunchDescription(
         [
             camera_node,
-            #motor_driver,
+            motor_driver,
         ]
     )

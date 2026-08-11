@@ -254,31 +254,31 @@ class MotorDriver(Node):
             ),
         )
 
-        self.twist_topic = self.get_parameter("twist_topic").value()
+        self.twist_topic = self.get_parameter("twist_topic").value
 
-        self.left_enable_pin = self.get_parameter("left_enable_pin").value()
+        self.left_enable_pin = self.get_parameter("left_enable_pin").value
 
-        self.left_forward_pin = self.get_parameter("left_forward_pin").value()
+        self.left_forward_pin = self.get_parameter("left_forward_pin").value
 
-        self.left_backward_pin = self.get_parameter("left_backward_pin").value()
+        self.left_backward_pin = self.get_parameter("left_backward_pin").value
 
-        self.right_enable_pin = self.get_parameter("right_enable_pin").value()
+        self.right_enable_pin = self.get_parameter("right_enable_pin").value
 
-        self.right_forward_pin = self.get_parameter("right_forward_pin").value()
+        self.right_forward_pin = self.get_parameter("right_forward_pin").value
 
-        self.right_backward_pin = self.get_parameter("right_backward_pin").value()
+        self.right_backward_pin = self.get_parameter("right_backward_pin").value
 
-        self.wheel_radius = self.get_parameter("wheel_radius").value()
+        self.wheel_radius = self.get_parameter("wheel_radius").value
 
-        self.wheel_separation = self.get_parameter("wheel_separation").value()
+        self.wheel_separation = self.get_parameter("wheel_separation").value
 
-        self.max_linear_vel = self.get_parameter("max_linear_vel").value()
+        self.max_linear_vel = self.get_parameter("max_linear_vel").value
 
-        self.max_angular_vel = self.get_parameter("max_angular_vel").value()
+        self.max_angular_vel = self.get_parameter("max_angular_vel").value
 
-        self.max_rpm = self.get_parameter("max_rpm").value()
+        self.max_rpm = self.get_parameter("max_rpm").value
 
-        self.frequency = self.get_parameter("frequency").value()
+        self.frequency = self.get_parameter("frequency").value
 
         self.clamp_motor_min = self.get_parameter("clamp_motor_min").value
         self.clamp_motor_max = self.get_parameter("clamp_motor_max").value
