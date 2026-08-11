@@ -1,8 +1,12 @@
 import rclpy
 from rclpy.node import Node
-from rclpy.clock import Time
-import rclpy.parameter
-from rcl_interfaces.msg import ParameterDescriptor, FloatingPointRange, IntegerRange
+from typing import Any, cast
+from rcl_interfaces.msg import (
+    ParameterDescriptor,
+    FloatingPointRange,
+    ListParametersResult,
+)
+from rclpy.timer import Timer
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from std_msgs.msg import Float64, Int8, String
 from geometry_msgs.msg import Twist
@@ -29,7 +33,7 @@ class RouteNavigator(Node):
 
         name: str
         priority: int
-        directions: list[gridbot.ArucoDirection]
+        directions: list[gridbot.RobotDirection]
 
         def __init__(self, name, priority, directions):
             self.name = name
@@ -48,7 +52,7 @@ class RouteNavigator(Node):
     line_turning_topic: str
     user_cmd_topic: str
 
-    graph: dict[str : dict[str:int]]
+    graph: dict[str, dict[str, int]]
     graph_width: int
     graph_height: int
 
@@ -64,7 +68,7 @@ class RouteNavigator(Node):
     sum_error: float
     prev_error: float
 
-    prev_time: Time
+    prev_time: int | None
     pid_output: float
     k_p: float
     k_i: float
@@ -81,24 +85,21 @@ class RouteNavigator(Node):
     # state machine var
     curr_state: gridbot.RobotState
 
-    is_lost_start = None
-    is_lost: bool = None
+    pause_start: int
 
-    pause_start = None
-
-    node_reached: bool = None
+    node_reached: bool
 
     last_line_observation: gridbot.LineObservation
-    center_found: bool = None
+    center_found: bool
 
-    clear_nodes: bool = None
+    clear_nodes: bool
 
-    twist_timer = None
+    twist_timer: Timer
 
     def __init__(self, node_name: str):
         super().__init__(node_name)
 
-        self.prev_time = None
+        self.prev_time = 0
         self.prev_error = 0.0
 
         self.sum_error = 0.0
@@ -108,7 +109,7 @@ class RouteNavigator(Node):
 
         self.curr_state = gridbot.RobotState.IDLE
 
-        self.last_line_observation = None
+        self.last_line_observation = gridbot.LineObservation.NONE
 
         self._setup_parameters()
 
@@ -187,19 +188,19 @@ class RouteNavigator(Node):
         start = self.curr_pos
         self.robot_route = self._generate_route(start, nodes_from_msg)
 
-    def line_offset_callback(self, msg: Float64):
+    def line_offset_callback(self, msg: Float64) -> None:
         error = float(msg.data)
 
-        now = self.get_clock().now()
+        now = self.get_clock().now().nanoseconds
 
         if self.prev_time is None:
             self.prev_time = now
             self.prev_error = error
 
-            return 0.0
+            return
 
         duration = now - self.prev_time
-        dt = duration.nanoseconds * 1e-9
+        dt = duration * 1e-9
 
         if dt < 1e-6:
             return
@@ -252,12 +253,12 @@ class RouteNavigator(Node):
         self.node_reached = True
         return
 
-    def line_turning_callback(self, msg: Int8):
+    def line_turning_callback(self, msg: Int8) -> None:
 
         if self.curr_state not in [gridbot.RobotState.TURNING]:
             return
 
-        flags = msg.data
+        flags = gridbot.LineObservation(msg.data)
 
         if self.last_line_observation is None:
             self.last_line_observation = flags
@@ -297,6 +298,9 @@ class RouteNavigator(Node):
             return
 
         new_state = None
+
+        next_node = None
+        next_dir = None
 
         if self.curr_state != gridbot.RobotState.PAUSED:
 
@@ -594,14 +598,18 @@ class RouteNavigator(Node):
 
         with open(yaml_path) as stream:
             try:
-                load = yaml.safe_load(stream)
+                load = cast(dict[str, Any] | None, yaml.safe_load(stream))
+
+                if load is None:
+                    self.get_logger().error("YAML file is empty.")
+                    return
+
                 self.graph = load["graph"]
                 self.graph_height = load["graph_height"]
                 self.graph_width = load["graph_width"]
-                pass
-            except yaml.YAMLError as e:
-                self.get_logger().error(e)
 
+            except yaml.YAMLError as e:
+                self.get_logger().error(str(e))
         self.curr_pos = self.get_parameter("default_pos").value
 
         dir = str(self.get_parameter("default_dir").value).upper()
@@ -622,12 +630,13 @@ class RouteNavigator(Node):
         self.linear_vel_multiplier = self.get_parameter("linear_vel_multiplier").value
         self.angular_vel_multiplier = self.get_parameter("angular_vel_multiplier").value
 
-        param_names = self.list_parameters([], depth=10).names
-        params = self.get_parameters(param_names)
+        result: ListParametersResult = self.list_parameters([], depth=0)
+
+        parameters = self.get_parameters(list(result.names))
 
         self.get_logger().info("=" * 40)
-        for param in params:
-            self.get_logger().info(f"{param.name}: {param.value}")
+        for parameter in parameters:
+            self.get_logger().info(f"{parameter.name}: {parameter.value}")
 
         self.get_logger().info(
             "graph:\n" + "\n".join(f"{k}: {v}" for k, v in self.graph.items())
@@ -680,10 +689,13 @@ class RouteNavigator(Node):
 
         for next_node in route:
 
-            target_dir = self._get_direction_between(
+            target_dir: gridbot.ArucoDirection | None = self._get_direction_between(
                 curr_node,
                 next_node.name,
             )
+
+            if target_dir is None:
+                return
 
             dir_diff = (target_dir.value - curr_dir.value) % 4
 
@@ -745,7 +757,9 @@ class RouteNavigator(Node):
             curr_dir = target_dir
             curr_node = next_node.name
 
-    def _get_direction_between(self, node_a: str, node_b: str):
+    def _get_direction_between(
+        self, node_a: str, node_b: str
+    ) -> gridbot.ArucoDirection | None:
         xa, ya = gridbot.node_to_coords(node_a)
         xb, yb = gridbot.node_to_coords(node_b)
 
@@ -771,8 +785,9 @@ class RouteNavigator(Node):
 
     def available_directions(self, node: str) -> set[int]:
         return {
-            self._get_direction_between(node, neighbour).value
+            direction.value
             for neighbour in self.graph.get(node, {})
+            if (direction := self._get_direction_between(node, neighbour)) is not None
         }
 
     def a_star(self, start_node: str, goal_node: str):

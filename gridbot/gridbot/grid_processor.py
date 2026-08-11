@@ -979,7 +979,7 @@ class GridProcessor(Node):
         self.midline_step = self.get_parameter("midline_step").value
         self.followed_node_offset = self.get_parameter("followed_node_offset").value
 
-        param_names = self.list_parameters([], depth=10).names
+        param_names: list[str] = self.list_parameters([], depth=10).names
         params = self.get_parameters(param_names)
 
         self.get_logger().info("=" * 40)

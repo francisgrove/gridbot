@@ -3,12 +3,13 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
-from rcl_interfaces.msg import ParameterDescriptor
-
+from rcl_interfaces.msg import (
+    ParameterDescriptor,
+    ListParametersResult,
+)
 import numpy as np
 from math import pi
 from gpiozero import Motor
-
 
 """
 This node utilises lgpio to directly communicate with the motor drivers, as opposed to using a ROS2 Control with a hardware interface. The reasoning for that is because Alphabot2 does not have wheel encoders, making odometry feedback unobtainable reliably. In the future, it's planned to port this code onto Alphabot1, which does have such encoders. In such case, this node is going to likely be retired from use, as ROS2 control needs its own C++ code structure.
@@ -17,41 +18,48 @@ This node utilises lgpio to directly communicate with the motor drivers, as oppo
 
 class MotorDriver(Node):
 
-    twist_topic = None
+    twist_topic: str
 
-    left_enable_pin = 0
-    left_forward_pin = 0
-    left_backward_pin = 0
+    left_enable_pin: int
+    left_forward_pin: int
+    left_backward_pin: int
 
-    right_enable_pin = 0
-    right_forward_pin = 0
-    right_backward_pin = 0
+    right_enable_pin: int
+    right_forward_pin: int
+    right_backward_pin: int
 
-    wheel_radius = 0.0
-    wheel_separation = 0.0
+    wheel_radius: float
+    wheel_separation: float
 
-    max_rpm = 0
-    frequency = 0.0
+    max_rpm: int
+    frequency: float
 
-    max_linear_vel = 0.0
-    max_angular_vel = 0.0
+    max_linear_vel: float
+    max_angular_vel: float
 
-    left_wheel = None
-    right_wheel = None
+    clamp_motor_min: float
+    clamp_motor_max: float
 
-    max_rad = None
+    left_wheel: Motor
+    right_wheel: Motor
 
-    def __init__(self):
-        super().__init__("motor_driver")
+    max_rad: int
+
+    def __init__(self, node_name: str):
+        super().__init__(node_name)
 
         self._setup_parameters()
-        
+
         self.left_wheel = Motor(
             enable=self.left_enable_pin,
             forward=self.left_forward_pin,
             backward=self.left_backward_pin,
             pwm=True,
         )
+
+        if self.left_wheel.pin_factory is None:
+            raise RuntimeError("Motor has no pin factory")
+
         self.left_wheel.pin_factory.pwm_default_freq = self.frequency
 
         self.right_wheel = Motor(
@@ -60,11 +68,14 @@ class MotorDriver(Node):
             backward=self.right_backward_pin,
             pwm=True,
         )
+
+        if self.right_wheel.pin_factory is None:
+            raise RuntimeError("Motor has no pin factory")
+
         self.right_wheel.pin_factory.pwm_default_freq = self.frequency
 
         self.max_rad_s = (self.max_rpm / 60) * 2 * pi
 
-        # setup sub
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
@@ -80,33 +91,49 @@ class MotorDriver(Node):
 
         self.context.on_shutdown(self.cleanup)
 
+    def cleanup(self):
+        self.left_wheel.value = 0
+        self.right_wheel.value = 0
+
     def twist_callback(self, msg: Twist):
-        # twist messages are always
-        # linear: X
-        # angular: Z
-        # the node that
+        self.get_logger().info(
+            f"Received - Linear: {msg.linear.x:.2f}, Angular: {msg.angular.z:.2f}"
+        )
 
-        linear_vel = np.clip(msg.linear.x, 0, self.max_linear_vel)
-        angular_vel = np.clip(msg.angular.z, 0, self.max_angular_vel)
+        linear_vel = np.clip(-msg.linear.x, -self.max_linear_vel, self.max_linear_vel)
+        angular_vel = np.clip(
+            msg.angular.z, -self.max_angular_vel, self.max_angular_vel
+        )
 
-        # rad/s
         left_wheel_vel = (
-            linear_vel - (angular_vel * self.wheel_separation / 2.0)
+            linear_vel + (angular_vel * self.wheel_separation / 2.0)
         ) / self.wheel_radius
         right_wheel_vel = (
-            linear_vel + (angular_vel * self.wheel_separation / 2.0)
+            linear_vel - (angular_vel * self.wheel_separation / 2.0)
         ) / self.wheel_radius
 
         # normalize
         left_wheel_vel /= self.max_rad_s
         right_wheel_vel /= self.max_rad_s
 
-        self.left_wheel.value = left_wheel_vel
-        self.right_wheel.value = right_wheel_vel
+        left_val = max(-1.0, min((left_wheel_vel / self.max_rad_s), 1.0))
+        right_val = max(-1.0, min((right_wheel_vel / self.max_rad_s), 1.0))
 
-    def cleanup(self):
-        self.left_wheel.value = 0
-        self.right_wheel.value = 0
+        self.get_logger().info(
+            f"Outputting to Pins - Left: {left_val:.4f}, Right: {right_val:.4f}"
+        )
+
+        self.left_wheel.value = self._motor_scale(left_val)
+        self.right_wheel.value = self._motor_scale(right_val)
+
+    def _motor_scale(self, wheel_val: float):
+        if abs(wheel_val) < 1e-3:
+            return 0.0
+
+        sign = np.sign(wheel_val)
+        x = abs(wheel_val)
+
+        return sign * (self.clamp_motor_min + (self.clamp_motor_max) * x)
 
     def _setup_parameters(self):
         self.declare_parameter(
@@ -207,77 +234,70 @@ class MotorDriver(Node):
 
         self.declare_parameter(
             "frequency",
-            50,
+            50.0,
             descriptor=ParameterDescriptor(description="Frequency of the PWM pins."),
         )
 
-
-        self.twist_topic = (
-            self.get_parameter("twist_topic").get_parameter_value().string_value
+        self.declare_parameter(
+            "clamp_motor_min",
+            0.1,
+            descriptor=ParameterDescriptor(
+                description="Minimum value to which the wheel values will be clamped"
+            ),
         )
 
-        self.left_enable_pin = (
-            self.get_parameter("left_enable_pin").get_parameter_value().integer_value
+        self.declare_parameter(
+            "clamp_motor_max",
+            0.1,
+            descriptor=ParameterDescriptor(
+                description="Maximum value to which the wheel values will be clamped"
+            ),
         )
 
-        self.left_forward_pin = (
-            self.get_parameter("left_forward_pin").get_parameter_value().integer_value
-        )
+        self.twist_topic = self.get_parameter("twist_topic").value()
 
-        self.left_backward_pin = (
-            self.get_parameter("left_backward_pin").get_parameter_value().integer_value
-        )
+        self.left_enable_pin = self.get_parameter("left_enable_pin").value()
 
-        self.right_enable_pin = (
-            self.get_parameter("right_enable_pin").get_parameter_value().integer_value
-        )
+        self.left_forward_pin = self.get_parameter("left_forward_pin").value()
 
-        self.right_forward_pin = (
-            self.get_parameter("right_forward_pin").get_parameter_value().integer_value
-        )
+        self.left_backward_pin = self.get_parameter("left_backward_pin").value()
 
-        self.right_backward_pin = (
-            self.get_parameter("right_backward_pin").get_parameter_value().integer_value
-        )
+        self.right_enable_pin = self.get_parameter("right_enable_pin").value()
 
-        self.wheel_radius = (
-            self.get_parameter("wheel_radius").get_parameter_value().double_value
-        )
+        self.right_forward_pin = self.get_parameter("right_forward_pin").value()
 
-        self.wheel_separation = (
-            self.get_parameter("wheel_separation").get_parameter_value().double_value
-        )
+        self.right_backward_pin = self.get_parameter("right_backward_pin").value()
 
-        self.max_linear_vel = (
-            self.get_parameter("max_linear_vel").get_parameter_value().double_value
-        )
+        self.wheel_radius = self.get_parameter("wheel_radius").value()
 
-        self.max_angular_vel = (
-            self.get_parameter("max_angular_vel").get_parameter_value().double_value
-        )
+        self.wheel_separation = self.get_parameter("wheel_separation").value()
 
-        self.max_rpm = self.get_parameter("max_rpm").get_parameter_value().integer_value
+        self.max_linear_vel = self.get_parameter("max_linear_vel").value()
 
-        self.frequency = (
-            self.get_parameter("frequency").get_parameter_value().double_value
-        )
+        self.max_angular_vel = self.get_parameter("max_angular_vel").value()
 
+        self.max_rpm = self.get_parameter("max_rpm").value()
 
-        param_names = self.list_parameters([], depth=10).names
-        params = self.get_parameters(param_names)
+        self.frequency = self.get_parameter("frequency").value()
+
+        self.clamp_motor_min = self.get_parameter("clamp_motor_min").value
+        self.clamp_motor_max = self.get_parameter("clamp_motor_max").value
+
+        result: ListParametersResult = self.list_parameters([], depth=0)
+        parameters = self.get_parameters(list(result.names))
 
         self.get_logger().info("=" * 40)
-        for param in params:
+        for param in parameters:
             self.get_logger().info(f"{param.name}: {param.value}")
         self.get_logger().info("=" * 40)
 
 
-
 def main(args=None):
-    print("Hi from motor_driver.")
+    node_name: str = "motor_driver"
+    print(f"Hi from {node_name}.")
     rclpy.init(args=args)
 
-    motor_driver = MotorDriver()
+    motor_driver = MotorDriver(node_name)
     rclpy.spin(motor_driver)
     motor_driver.destroy_node()
     rclpy.shutdown()
