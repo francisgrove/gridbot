@@ -89,3 +89,18 @@ Then, on your PC run:
 ```bash
 ros2 launch gridbot pc_nodes.launch.py
 ```
+
+## Moving the robot
+
+(This section is written following the `route_navigator.py` node)
+
+The robot listens to directions sent to the `gridbot/user_cmd` topic that expects String type messages (e.g. "A3 B2 C1").
+
+It will generate intermediate nodes between these nodes via A* and convert them to directions suitable for a Diff-drive robot (Move, Turn Left/Right).
+
+**Moving:**
+1. The robot listens to `line_offset` topic for the offset from the grid line's center, and uses a PID controller to correct its course.
+2. The robot listens to a `aruco` topic. Whenever the robot stands on a tag, it will receive a message to this topic with the tag's ID and direction, relative to the robot's orientation. 
+
+**Turning:**
+1. The robot listens to the `line_turning` topic. Anytime the line observations change (whether a line is visible on the left, central or right side of the image), a new message is sent to this topic. When a new line is centered (new meaning, we previously lost a line) the robot considers itself to have made a proper turn).
