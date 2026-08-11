@@ -59,7 +59,6 @@ setup(
     entry_points={
         "console_scripts": [
             "grid_processor = gridbot.grid_processor:main",
-            "path_navigator = gridbot.path_navigator:main",
             "route_navigator = gridbot.route_navigator:main",
             "motor_driver = gridbot.motor_driver:main",
             "map_generator = gridbot.map_generator:main",

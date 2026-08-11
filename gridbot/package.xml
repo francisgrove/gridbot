@@ -15,7 +15,6 @@
   <depend>ros2launch</depend>
   <depend>python-rpi.gpio</depend>
   <depend>foxglove-bridge</depend>
-  <depend>python3-pyzbar</depend>
   <depend>image_transport</depend>
   <depend>gridbot_interfaces</depend>
 

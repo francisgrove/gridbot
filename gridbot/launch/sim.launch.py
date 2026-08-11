@@ -42,6 +42,12 @@ def generate_launch_description():
         choices=["error", "warn", "debug", "info"],
     )
 
+    foxglove_arg = DeclareLaunchArgument(
+        "foxglove",
+        default_value="true",
+        description="Launch Foxglove server",
+    )
+
     rosout_level = LaunchConfiguration("rosout_level")
 
     gazebo_launch_path = os.path.join(
@@ -214,13 +220,15 @@ def generate_launch_description():
     )
 
     foxglove_launch = IncludeLaunchDescription(
-        XMLLaunchDescriptionSource(foxglove_launch_path)
+        XMLLaunchDescriptionSource(foxglove_launch_path),
+        condition=IfCondition(LaunchConfiguration("foxglove"))
     )
 
     return LaunchDescription(
         [
             gui_arg,
             rosout_level_arg,
+            foxglove_arg,
             set_gz_model_path,
             gazebo_gui,
             gazebo_headless,
