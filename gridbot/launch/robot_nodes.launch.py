@@ -13,54 +13,56 @@ def generate_launch_description():
 
     motor_driver_config = os.path.join(pkg_share, "config", "motor_driver_params.yaml")
 
-    composable_nodes = [
-        ComposableNode(
-            package="camera_ros",
-            plugin="camera::CameraNode",
-            name="camera_node",
-            namespace=pkg_name,
-            parameters=[{"orientation": 180, "width": 640, "height": 480}],
-            remappings=[
-                ("image_raw", f"/{pkg_name}/image_raw"),
-                ("camera_info", f"/{pkg_name}/camera_info"),
-            ],
-        ),
-        ComposableNode(
-            package="image_proc",
-            plugin="image_proc::RectifyNode",
-            name="rectify_node",
-            namespace=pkg_name,
-            remappings=[
-                ("image", f"/{pkg_name}/image_raw"),
-                ("camera_info", f"/{pkg_name}/camera_info"),
-                ("image_rect", f"/{pkg_name}/image_rect"),
-            ],
-        ),
-        ComposableNode(
-            package="image_proc",
-            plugin="image_proc::CropDecimateNode",
-            name="crop_decimate_node",
-            namespace=pkg_name,
-            remappings=[
-                ("image", f"/{pkg_name}/image_raw"),
-                ("camera_info", f"/{pkg_name}/camera_info"),
-                ("image_rect", f"/{pkg_name}/image_rect"),
-            ],
-            parameters={
-                "decimation_x": 2,
-                "decimation_y": 2,
-            },  # pyright: ignore[reportArgumentType]
-        ),
-    ]
+    camera_name = "camera"
 
+    camera_node = Node(
+            package="camera_ros",
+            executable="camera_node",
+            name=camera_name,
+            parameters=[{"orientation": 180, "width": 640, "height": 480}],
+            namespace=pkg_name,
+            remappings=[
+                ("image_raw", "image_raw"),
+                ("camera_info", "camera_info"),
+            ],
+        )
+
+    composable_nodes = [
+            ComposableNode(
+                package="image_proc",
+                plugin="image_proc::RectifyNode",
+                name="rectify_node",
+                namespace=f"{pkg_name}/{camera_name}",
+                remappings=[
+                    ("image_raw", "image_raw"),
+                    ("image_rect", "image_rect")
+                ],
+            ),
+            ComposableNode(
+                package="image_proc",
+                plugin="image_proc::CropDecimateNode",
+                name="crop_decimate_node",
+                namespace=f"{pkg_name}/{camera_name}",
+                remappings=[
+                    ("in/image_raw", "image_rect"),
+                    ("out/image_raw", "image_downsized")
+                ],
+                parameters=[{
+                    "decimation_x": 2,
+                    "decimation_y": 2,
+                }]
+            )
+        ]
+        
     container = ComposableNodeContainer(
         name="image_proc_container",
         package="rclcpp_components",
         executable="component_container",
+        namespace=pkg_name,
         composable_node_descriptions=composable_nodes,
     )  # pyright: ignore[reportCallIssue]
 
-    # flip, as the robot's camera is physically upside-down
+    # flip, as the robot"s camera is physically upside-down
 
     motor_driver = Node(
         package="gridbot",
@@ -73,7 +75,8 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
+            camera_node,
             container,
-            motor_driver,
+            #motor_driver,
         ]
     )

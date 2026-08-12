@@ -93,15 +93,15 @@ class MotorDriver(Node):
         self.handler = self.handler.add_parameter_callback(
             parameter_name="vel_multiplier",
             node_name=node_name,
-            callback=self.vel_multiplier_callback,
-        )
+            callback=self.vel_multiplier_callback, # type: ignore
+        ) # pyright: ignore[reportAttributeAccessIssue]
 
         self.context.on_shutdown(self.cleanup)
 
     def vel_multiplier_callback(self, p: rclpy.parameter.Parameter) -> None:
         self.get_logger().info(f"Received an update to parameter: {p.name}: {rclpy.parameter.parameter_value_to_python(p.value)}")
 
-        self.vel_multiplier = rclpy.parameter.parameter_value_to_python(p.value)        
+        self.vel_multiplier = rclpy.parameter.parameter_value_to_python(p.value)         # type: ignore
 
 
     def cleanup(self):
