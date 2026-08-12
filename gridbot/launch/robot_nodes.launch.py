@@ -82,6 +82,6 @@ def generate_launch_description():
         [
             camera_node,
             container,
-            # motor_driver,
+            motor_driver,
         ]
     )

@@ -1,6 +1,6 @@
 /gridbot/grid_processor:
   ros__parameters:
-    camera_topic: "camera/image_raw/compressed"
+    camera_topic: "camera/image_rect/compressed"
     line_offset_topic: "line_offset"
     tracked_image_topic: "camera/image_tracked/compressed"
     aruco_topic: "aruco"
