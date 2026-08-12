@@ -16,44 +16,49 @@ def generate_launch_description():
     camera_name = "camera"
 
     camera_node = Node(
-            package="camera_ros",
-            executable="camera_node",
-            name=camera_name,
-            parameters=[{"orientation": 180, "width": 640, "height": 480}],
-            namespace=pkg_name,
-            remappings=[
-                ("image_raw", "image_raw"),
-                ("camera_info", "camera_info"),
-            ],
-        )
+        package="camera_ros",
+        executable="camera_node",
+        name=camera_name,
+        parameters=[{"orientation": 180, "width": 640, "height": 480}],
+        namespace=pkg_name,
+        remappings=[
+            ("image_raw", "image_raw"),
+            ("camera_info", "camera_info"),
+        ],
+    )
 
     composable_nodes = [
-            ComposableNode(
-                package="image_proc",
-                plugin="image_proc::RectifyNode",
-                name="rectify_node",
-                namespace=f"{pkg_name}/{camera_name}",
-                remappings=[
-                    ("image_raw", "image_raw"),
-                    ("image_rect", "image_rect")
-                ],
-            ),
-            ComposableNode(
-                package="image_proc",
-                plugin="image_proc::CropDecimateNode",
-                name="crop_decimate_node",
-                namespace=f"{pkg_name}/{camera_name}",
-                remappings=[
-                    ("in/image_raw", "image_rect"),
-                    ("out/image_raw", "image_downsized")
-                ],
-                parameters=[{
+        ComposableNode(
+            package="image_proc",
+            plugin="image_proc::RectifyNode",
+            name="rectify_node",
+            namespace=pkg_name,
+            remappings=[
+                ("image", f"{camera_name}/image_raw"),
+                ("image_rect", f"{camera_name}/image_rect"),
+            ],
+        ),
+        ComposableNode(
+            package="image_proc",
+            plugin="image_proc::CropDecimateNode",
+            name="crop_decimate_node",
+            namespace=pkg_name,
+            remappings=[
+                ("in/image_raw", f"{camera_name}/image_rect"),
+                ("in/camera_info", f"{camera_name}/camera_info"),
+                ("out/image_raw", f"{camera_name}/image_downsized"),
+                ("out/camera_info", f"{camera_name}/downsized_camera_info")
+            ],
+            
+            parameters=[
+                {
                     "decimation_x": 2,
                     "decimation_y": 2,
-                }]
-            )
-        ]
-        
+                }
+            ],
+        ),
+    ]
+
     container = ComposableNodeContainer(
         name="image_proc_container",
         package="rclcpp_components",
@@ -77,6 +82,6 @@ def generate_launch_description():
         [
             camera_node,
             container,
-            #motor_driver,
+            # motor_driver,
         ]
     )
