@@ -10,14 +10,11 @@
     right_forward_pin: 20
     right_backward_pin: 21
 
-    wheel_radius: 2.0
-    wheel_separation: 7.0
+    wheel_radius: 0.021
+    wheel_separation: 0.08382
 
-    max_linear_vel: 1.5
-    max_angular_vel: 30.0
+    vel_multiplier: 0.1
 
-    clamp_motor_min: 0.1
-    clamp_motor_max: 0.5
-
-    max_rpm: 600
     frequency: 50.0
+
+    invert_direction: true

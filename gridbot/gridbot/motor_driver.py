@@ -6,7 +6,10 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from rcl_interfaces.msg import (
     ParameterDescriptor,
     ListParametersResult,
+    FloatingPointRange,
 )
+import rclpy.parameter
+from rclpy.parameter_event_handler import ParameterEventHandler
 import numpy as np
 from math import pi
 from gpiozero import Motor
@@ -31,19 +34,15 @@ class MotorDriver(Node):
     wheel_radius: float
     wheel_separation: float
 
-    max_rpm: int
     frequency: float
 
-    max_linear_vel: float
-    max_angular_vel: float
-
-    clamp_motor_min: float
-    clamp_motor_max: float
-
+    vel_multiplier: float
+    
     left_wheel: Motor
     right_wheel: Motor
 
-    max_rad: int
+
+    invert_direction: bool
 
     def __init__(self, node_name: str):
         super().__init__(node_name)
@@ -74,8 +73,6 @@ class MotorDriver(Node):
 
         self.right_wheel.pin_factory.pwm_default_freq = self.frequency
 
-        self.max_rad_s = (self.max_rpm / 60) * 2 * pi
-
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
@@ -89,51 +86,56 @@ class MotorDriver(Node):
             qos_profile=qos,
         )
 
+        self.handler = self.handler.add_parameter_callback(
+            parameter_name="vel_multiplier",
+            node_name=node_name,
+            callback=self.vel_multiplier_callback,
+        )
+
         self.context.on_shutdown(self.cleanup)
+
+    def self.vel_multiplier_callback(self, p: rclpy.parameter.Parameter) -> None:
+        self.get_logger().info(f"Received an update to parameter: {p.name}: {rclpy.parameter.parameter_value_to_python(p.value)}")
+
 
     def cleanup(self):
         self.left_wheel.value = 0
         self.right_wheel.value = 0
+
 
     def twist_callback(self, msg: Twist):
         self.get_logger().info(
             f"Received - Linear: {msg.linear.x:.2f}, Angular: {msg.angular.z:.2f}"
         )
 
-        linear_vel = np.clip(-msg.linear.x, -self.max_linear_vel, self.max_linear_vel)
-        angular_vel = np.clip(
-            msg.angular.z, -self.max_angular_vel, self.max_angular_vel
-        )
+        direction = -1.0 if self.invert_direction else 1.0
 
-        left_wheel_vel = (
+        linear_vel = max(-1.0, min(direction*msg.linear.x, 1.0))
+        angular_vel = max(-1.0, min(direction*msg.angular.z, 1.0))
+
+
+        right_wheel_vel = (
             linear_vel + (angular_vel * self.wheel_separation / 2.0)
         ) / self.wheel_radius
-        right_wheel_vel = (
+        left_wheel_vel = (
             linear_vel - (angular_vel * self.wheel_separation / 2.0)
         ) / self.wheel_radius
 
-        # normalize
-        left_wheel_vel /= self.max_rad_s
-        right_wheel_vel /= self.max_rad_s
+        self.get_logger().info(
+            f"Raw wheel values - Left: {left_wheel_vel:.4f}, Right: {right_wheel_vel:.4f}"
+        )
 
-        left_val = max(-1.0, min((left_wheel_vel / self.max_rad_s), 1.0))
-        right_val = max(-1.0, min((right_wheel_vel / self.max_rad_s), 1.0))
+        left_val = self.vel_multiplier*max(-1.0, min(left_wheel_vel, 1.0))
+        right_val = self.vel_multiplier*max(-1.0, min(right_wheel_vel, 1.0))
 
         self.get_logger().info(
             f"Outputting to Pins - Left: {left_val:.4f}, Right: {right_val:.4f}"
         )
 
-        self.left_wheel.value = self._motor_scale(left_val)
-        self.right_wheel.value = self._motor_scale(right_val)
+        self.left_wheel.value = left_val
+        self.right_wheel.value = right_val
 
-    def _motor_scale(self, wheel_val: float):
-        if abs(wheel_val) < 1e-3:
-            return 0.0
 
-        sign = np.sign(wheel_val)
-        x = abs(wheel_val)
-
-        return sign * (self.clamp_motor_min + (self.clamp_motor_max) * x)
 
     def _setup_parameters(self):
         self.declare_parameter(
@@ -194,43 +196,35 @@ class MotorDriver(Node):
 
         self.declare_parameter(
             "wheel_radius",
-            2.0,
+            0.021,
             descriptor=ParameterDescriptor(
-                description="Radius of the wheels in centimeters."
+                description="Radius of the wheels in meters."
             ),
         )
 
         self.declare_parameter(
             "wheel_separation",
-            7.0,
+            0.08382,
             descriptor=ParameterDescriptor(
-                description="Distance between the centres of the two wheels in centimeters."
+                description="Distance between the centres of the two wheels in meters."
             ),
         )
 
         self.declare_parameter(
-            "max_linear_vel",
+            "vel_multiplier",
             1.0,
             descriptor=ParameterDescriptor(
-                description="Maximum linear velcoity for the robot.", read_only=True
+                description="Multiplier of the robot's velocity. 1.0 means full speed, 0.0 means nothing.",
+                floating_point_range=[
+                    FloatingPointRange(
+                        from_value=0,
+                        to_value=1.0,
+                        )
+                ],
+
             ),
         )
 
-        self.declare_parameter(
-            "max_angular_vel",
-            20.0,
-            descriptor=ParameterDescriptor(
-                description="Maximum angular velcoity for the robot.", read_only=True
-            ),
-        )
-
-        self.declare_parameter(
-            "max_rpm",
-            600,
-            descriptor=ParameterDescriptor(
-                description="Maximum RPM of the wheel motors.", read_only=True
-            ),
-        )
 
         self.declare_parameter(
             "frequency",
@@ -239,49 +233,25 @@ class MotorDriver(Node):
         )
 
         self.declare_parameter(
-            "clamp_motor_min",
-            0.1,
+            "invert_direction",
+            False,
             descriptor=ParameterDescriptor(
-                description="Minimum value to which the wheel values will be clamped"
-            ),
-        )
-
-        self.declare_parameter(
-            "clamp_motor_max",
-            0.1,
-            descriptor=ParameterDescriptor(
-                description="Maximum value to which the wheel values will be clamped"
-            ),
+                description="Whether to invert the direction of robot's movements."
+            )
         )
 
         self.twist_topic = self.get_parameter("twist_topic").value
-
         self.left_enable_pin = self.get_parameter("left_enable_pin").value
-
         self.left_forward_pin = self.get_parameter("left_forward_pin").value
-
         self.left_backward_pin = self.get_parameter("left_backward_pin").value
-
         self.right_enable_pin = self.get_parameter("right_enable_pin").value
-
         self.right_forward_pin = self.get_parameter("right_forward_pin").value
-
         self.right_backward_pin = self.get_parameter("right_backward_pin").value
-
         self.wheel_radius = self.get_parameter("wheel_radius").value
-
         self.wheel_separation = self.get_parameter("wheel_separation").value
-
-        self.max_linear_vel = self.get_parameter("max_linear_vel").value
-
-        self.max_angular_vel = self.get_parameter("max_angular_vel").value
-
-        self.max_rpm = self.get_parameter("max_rpm").value
-
+        self.vel_multiplier = self.get_parameter("vel_multiplier").value
         self.frequency = self.get_parameter("frequency").value
-
-        self.clamp_motor_min = self.get_parameter("clamp_motor_min").value
-        self.clamp_motor_max = self.get_parameter("clamp_motor_max").value
+        self.invert_direction = self.get_parameter("invert_direction").value
 
         result: ListParametersResult = self.list_parameters([], depth=0)
         parameters = self.get_parameters(list(result.names))

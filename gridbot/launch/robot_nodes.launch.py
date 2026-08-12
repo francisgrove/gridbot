@@ -20,7 +20,9 @@ def generate_launch_description():
         name="camera",
         namespace=pkg_name,
         parameters=[{
-            "orientation": 180
+            "orientation": 180,
+            "width": 640,
+            "height": 480
         }]
     )
 
