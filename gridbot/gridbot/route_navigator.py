@@ -111,6 +111,10 @@ class RouteNavigator(Node):
 
         self.last_line_observation = gridbot.LineObservation.NONE
 
+        self.clear_nodes = False
+        self.node_reached = False
+        self.center_found = False
+
         self._setup_parameters()
 
         sensor_qos = QoSProfile(

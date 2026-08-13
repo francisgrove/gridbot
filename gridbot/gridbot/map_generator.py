@@ -1,5 +1,5 @@
 import rclpy
-from rcl_interfaces.msg import ParameterDescriptor, IntegerRange,ListParametersResult
+from rcl_interfaces.msg import ParameterDescriptor, IntegerRange, ListParametersResult
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from ament_index_python.packages import get_package_share_directory
@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 
 from itertools import takewhile
+
 
 class _MapEdge:
     fr: str
@@ -61,6 +62,9 @@ class MapGenerator(Node):
     line_length: int
     line_thickness: int
 
+    padding: int
+    text_padding: int
+
     graph_width: int
     graph_height: int
 
@@ -87,24 +91,27 @@ class MapGenerator(Node):
 
         image = self._generate_image()
 
-
         success = cv2.imwrite(self.img_save_path, image)
 
         if success:
             self.get_logger().info(f"Saved map image to {self.img_save_path}.")
         else:
             self.get_logger().error(f"Error saving map image to {self.img_save_path}.")
-            
+
         graph = self._generate_graph()
 
-        yaml_contents = dict(graph_width=self.graph_width, graph_height=self.graph_height, graph=graph)
+        yaml_contents = dict(
+            graph_width=self.graph_width, graph_height=self.graph_height, graph=graph
+        )
 
         with open(self.yaml_save_path, "w") as f:
             try:
                 yaml.dump(yaml_contents, f, default_flow_style=False)
                 self.get_logger().info(f"Saved map graph to {self.yaml_save_path}.")
             except:
-                self.get_logger().error(f"Error saving map graph to {self.yaml_save_path}.")
+                self.get_logger().error(
+                    f"Error saving map graph to {self.yaml_save_path}."
+                )
 
     def _setup_parameters(self):
         self.declare_parameter(
@@ -175,7 +182,7 @@ class MapGenerator(Node):
                 description="Size of edge weight text in pixels.",
                 integer_range=[
                     IntegerRange(
-                        from_value=1,
+                        from_value=0,
                         to_value=2048,
                         step=1,
                     )
@@ -198,6 +205,36 @@ class MapGenerator(Node):
                     IntegerRange(
                         from_value=1,
                         to_value=4096,
+                        step=1,
+                    )
+                ],
+            ),
+        )
+
+        self.declare_parameter(
+            name="padding",
+            value=8,
+            descriptor=ParameterDescriptor(
+                description="Padding of a tag from the image border in pixels.",
+                integer_range=[
+                    IntegerRange(
+                        from_value=0,
+                        to_value=2048,
+                        step=1,
+                    )
+                ],
+            ),
+        )
+
+        self.declare_parameter(
+            name="text_padding",
+            value=8,
+            descriptor=ParameterDescriptor(
+                description="Padding of weight text from its line in pixels.",
+                integer_range=[
+                    IntegerRange(
+                        from_value=0,
+                        to_value=2048,
                         step=1,
                     )
                 ],
@@ -254,16 +291,14 @@ class MapGenerator(Node):
         self.declare_parameter(
             "removed_nodes",
             Parameter.Type.STRING_ARRAY,
-            ParameterDescriptor(
-                description="List of disabled nodes in the graph."
-            ),
+            ParameterDescriptor(description="List of disabled nodes in the graph."),
         )
 
         self.declare_parameter(
             "edges",
             Parameter.Type.STRING_ARRAY,
             ParameterDescriptor(
-                            description=(
+                description=(
                     "Graph edges formatted as FROM,TO,WEIGHT. " "Example: A1,B1,7"
                 ),
             ),
@@ -294,6 +329,9 @@ class MapGenerator(Node):
         self.line_length = self.get_parameter("line_length").value
         self.line_thickness = self.get_parameter("line_thickness").value
 
+        self.padding = self.get_parameter("padding").value
+        self.text_padding = self.get_parameter("text_padding").value
+
         self.removed_nodes = self.get_parameter("removed_nodes").value
         self.edges = self.get_parameter("edges").value
 
@@ -310,19 +348,9 @@ class MapGenerator(Node):
 
                 tag_id = x * self.graph_height + y
 
-                tag_x = (
-                    self.tag_size
-                    + self.line_length
-                    + x * self.line_length
-                    + self.tag_size // 2
-                )
+                tag_x = self.tag_size // 2 + x * (self.tag_size + self.line_length)
 
-                tag_y = (
-                    self.tag_size
-                    + self.line_length
-                    + y * self.line_length
-                    + self.tag_size // 2
-                )
+                tag_y = self.tag_size // 2 + y * (self.tag_size + self.line_length)
 
                 map_node = _MapNode(
                     x=tag_x,
@@ -416,19 +444,30 @@ class MapGenerator(Node):
         Generate the graph image.
         """
 
-        padding = self.line_length
+        node_xs = [node.x for node in self.node_map]
+        node_ys = [node.y for node in self.node_map]
 
-        width = 2 * padding + self.tag_size + (self.graph_width - 1) * self.line_length
+        min_x = min(node_xs)
+        max_x = max(node_xs)
+        min_y = min(node_ys)
+        max_y = max(node_ys)
 
-        height = (
-            2 * padding + self.tag_size + (self.graph_height - 1) * self.line_length
-        )
+        half_tag = self.tag_size // 2
+
+        width = (max_x - min_x) + self.tag_size
+        height = (max_y - min_y) + self.tag_size
 
         image = np.full(
             (height, width, 3),
             255,
             dtype=np.uint8,
         )
+
+        def transform_x(x):
+            return x - min_x + half_tag
+
+        def transform_y(y):
+            return max_y - y + half_tag
 
         for node_from, edges in self.node_map.items():
             for edge in edges:
@@ -441,11 +480,11 @@ class MapGenerator(Node):
                 if node_to is None:
                     continue
 
-                from_x = node_from.x
-                from_y = height - node_from.y
+                from_x = transform_x(node_from.x)
+                from_y = transform_y(node_from.y)
 
-                to_x = node_to.x
-                to_y = height - node_to.y
+                to_x = transform_x(node_to.x)
+                to_y = transform_y(node_to.y)
 
                 cv2.line(
                     image,
@@ -456,14 +495,19 @@ class MapGenerator(Node):
                     cv2.LINE_4,
                 )
 
-                text_x_offset = self.tag_size if from_x == to_x else 0
-                text_y_offset = self.tag_size // 2 if from_y == to_y else 0
+                text_x_offset = self.text_padding if from_x == to_x else 0
+                text_y_offset = self.text_padding if from_y == to_y else 0
 
                 text_x = (from_x + to_x) // 2 - text_x_offset
                 text_y = (from_y + to_y) // 2 - text_y_offset
 
-                text_scale = 1 / 2
-                text_thickness = 1
+                text_scale = cv2.getFontScaleFromHeight(
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    pixelHeight=self.text_size,
+                    thickness=self.text_size,
+                )
+
+                self.get_logger().info(f"calculated text size: {text_scale}")
 
                 cv2.putText(
                     image,
@@ -472,8 +516,8 @@ class MapGenerator(Node):
                     cv2.FONT_HERSHEY_DUPLEX,
                     text_scale,
                     (0, 0, 0),
-                    text_thickness,
-                    cv2.LINE_8,
+                    1,
+                    cv2.LINE_AA,
                     False,
                 )
 
@@ -490,11 +534,11 @@ class MapGenerator(Node):
                 cv2.COLOR_GRAY2BGR,
             )
 
-            center_x = node.x
-            center_y = height - node.y
+            center_x = transform_x(node.x)
+            center_y = transform_y(node.y)
 
-            x0 = center_x - self.tag_size // 2
-            y0 = center_y - self.tag_size // 2
+            x0 = center_x - half_tag
+            y0 = center_y - half_tag
 
             x1 = x0 + self.tag_size
             y1 = y0 + self.tag_size
@@ -502,8 +546,8 @@ class MapGenerator(Node):
             image[y0:y1, x0:x1] = marker
 
         scale = min(
-            self.img_width / width,
-            self.img_height / height,
+            (self.img_width - 2 * self.padding) / width,
+            (self.img_height - 2 * self.padding) / height,
         )
 
         scaled_width = round(width * scale)
@@ -521,8 +565,13 @@ class MapGenerator(Node):
             dtype=np.uint8,
         )
 
-        x_offset = (self.img_width - scaled_width) // 2
-        y_offset = (self.img_height - scaled_height) // 2
+        x_offset = (
+            self.padding + (self.img_width - 2 * self.padding - scaled_width) // 2
+        )
+
+        y_offset = (
+            self.padding + (self.img_height - 2 * self.padding - scaled_height) // 2
+        )
 
         final_image[
             y_offset : y_offset + scaled_height,

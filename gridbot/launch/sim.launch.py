@@ -107,9 +107,9 @@ def generate_launch_description():
             "-name",
             "road_bot",
             "-x",
-            "-0.46",
+            "-0.16",
             "-y",
-            "0.6",
+            "0.45",
             "-z",
             "0.15",
             "-R",
@@ -163,7 +163,7 @@ def generate_launch_description():
         arguments=["raw", "compressed"],
         remappings=[
             ("in", "camera/image_raw"),
-            ("out/compressed", "camera/image_raw/compressed"),
+            ("out/compressed", "camera/image_rect/compressed"),
         ],
         output="screen",
     )

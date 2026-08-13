@@ -12,8 +12,8 @@
     center_line_roi_width: 0.2
     sides_line_roi_width: 0.3
 
-    aruco_roi_width: 0.5
-    aruco_roi_height: 0.8
+    aruco_roi_width: 0.8
+    aruco_roi_height: 1.0
 
     line_turning_threshold: 0.5
 
