@@ -14,6 +14,7 @@ def generate_launch_description():
     motor_driver_config = os.path.join(pkg_share, "config", "motor_driver_params.yaml")
 
     camera_name = "camera"
+    
 
     camera_node = Node(
         package="camera_ros",
@@ -82,6 +83,6 @@ def generate_launch_description():
         [
             camera_node,
             container,
-            # motor_driver,
+            motor_driver,
         ]
     )

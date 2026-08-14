@@ -72,13 +72,15 @@ class GridProcessor(Node):
     last_found_aruco: int
     last_found_direction: gridbot.ArucoDirection
 
-    hue_low: int = 0
-    sat_low: int = 0
-    val_low: int = 0
+    clahe: cv2.CLAHE
 
-    hue_high: int = 0
-    sat_high: int = 0
-    val_high: int = 0
+    h_thresh_low: int = 0
+    s_thresh_low: int = 0
+    v_thresh_low: int = 0
+
+    h_thresh_high: int = 0
+    s_thresh_high: int = 0
+    v_thresh_high: int = 0
 
     handler: ParameterEventHandler
 
@@ -135,16 +137,18 @@ class GridProcessor(Node):
             CompressedImage, "camera/line_mask", qos_profile=qos
         )
 
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+
         self.handler = ParameterEventHandler(self)
 
-
         for parameter_name in (
-            "hue_low",
-            "sat_low",
-            "val_low",
-            "hue_high",
-            "sat_high",
-            "val_high",
+            "h_thresh_low",
+            "s_thresh_low",
+            "v_thresh_low",
+            "h_thresh_high",
+            "s_thresh_high",
+            "v_thresh_high",
+            "line_color",
         ):
             self.handler.add_parameter_callback(
                 parameter_name=parameter_name,
@@ -160,16 +164,17 @@ class GridProcessor(Node):
         setattr(self, p.name, value)
 
     def image_callback(self, msg: CompressedImage):
-        frame = bridge.compressed_imgmsg_to_cv2(
+        frame_raw = bridge.compressed_imgmsg_to_cv2(
             cmprs_img_msg=msg, desired_encoding="bgr8"
         )
 
-        frame = cv2.medianBlur(frame, 11)
+        # frame = self._quantize_image(frame_raw, divider=64)
+
+        frame = frame_raw
 
         if frame is None:
             self.get_logger().error("Error while trying to read frame.")
             return
-        
 
         # in case image resolution changes (shouldn't, but...), update ROIs
         h, w = frame.shape[:2]
@@ -178,7 +183,8 @@ class GridProcessor(Node):
             self.img_h = h
             self._prepare_rois()
 
-        upper_edge, top_edge, direction = self.aruco_tracking(frame)
+        upper_edge, top_edge, direction = None, None, None
+        # upper_edge, top_edge, direction = self.aruco_tracking(frame)
 
         centerline, target_node = self.line_tracking(frame)
         self.turning_tracking(frame)
@@ -190,6 +196,12 @@ class GridProcessor(Node):
 
             tracked_image_msg = bridge.cv2_to_compressed_imgmsg(cvim=tracked_image)
             self.tracked_image_pub.publish(tracked_image_msg)
+
+    def _quantize_image(self, img: np.ndarray, divider: int):
+
+        frame = img // divider * divider + divider // 2
+
+        return frame
 
     def _prepare_rois(self):
         """
@@ -419,23 +431,19 @@ class GridProcessor(Node):
         cv2.namedWindow(winname=name, flags=cv2.WINDOW_FREERATIO)
         cv2.imshow(winname=name, mat=src)
 
-
-
     def line_tracking(self, frame: np.array):
         """
-        1. Masks out the frame by the line_color. Converts each bit island to a contour. 
+        1. Masks out the frame by the line_color. Converts each bit island to a contour.
         2. Picks the contour by these criteria:
             a) Biggest area
-            b) Has centroid in 
+            b) Has centroid in
         3. For this contour, finds a centerline node chain
         4. For picked node, finds its offset and sends it.
         """
 
         camera_center = (self.img_w // 2, self.img_h // 2)
 
-        line_bitmask = self.get_mask_hsv(
-            src=frame, color=self.line_color, threshold=50
-        )
+        line_bitmask = self.get_mask_from_color(img=frame, color=self.line_color)
 
         line_bitmask_crop = cv2.bitwise_and(
             src1=line_bitmask, src2=line_bitmask, mask=self.center_roi_mask
@@ -451,9 +459,11 @@ class GridProcessor(Node):
         max_line_mask = np.zeros_like(frame)
         cv2.drawContours(max_line_mask, [max_line_contour], -1, (255, 255, 255), -1)
 
+        self._make_window("test", max_line_mask)
+        cv2.waitKey(1)
+
         mask_msg = bridge.cv2_to_compressed_imgmsg(max_line_mask)
 
-        self.get_logger().info(f"Pblishing mask image")
         self.line_mask_pub.publish(mask_msg)
 
         centerline = self._get_centerline(max_line_mask)
@@ -619,7 +629,7 @@ class GridProcessor(Node):
     """
 
     def turning_tracking(self, frame):
-        line_bitmask = self.get_mask_hsv(src=frame, color=self.line_color)
+        line_bitmask = self.get_mask_from_color(img=frame, color=self.line_color)
 
         rois = {
             gridbot.LineObservation.LEFT: self.left_roi_mask,
@@ -758,127 +768,151 @@ class GridProcessor(Node):
 
         return contours
 
-    def get_mask_hsv(self, src, color, threshold=15):
-        src_hsv = cv2.cvtColor(src, cv2.COLOR_BGR2HSV)
+    def get_mask_from_color(self, img, color):
+        img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-        src_hsv = cv2.cvtColor(src, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(img_hsv)
+        v = self.clahe.apply(v)
+        img_hsv = cv2.merge([h, s, v])
 
-        h, s, v = cv2.split(src_hsv)
-
-        clahe = cv2.createCLAHE(
-            clipLimit=2.0,
-            tileGridSize=(8, 8),
+        # color is RGB
+        color_h, color_s, color_v = colorsys.rgb_to_hsv(
+            r=color[0] / 255.0,
+            g=color[1] / 255.0,
+            b=color[2] / 255.0,
         )
 
-        v = clahe.apply(v)
+        color_h = round(color_h * 179)
+        color_s = round(color_s * 255)
+        color_v = round(color_v * 255)
 
-        src_hsv = cv2.merge([h, s, v])
+        h_low = color_h - self.h_thresh_low
+        h_high = color_h + self.h_thresh_high
 
-        lower_bound = np.array(
-            [
-                self.hue_low,
-                self.sat_low,
-                self.val_low,
-            ],
-            dtype=np.uint8,
-        )
+        s_low = max(0, color_s - self.s_thresh_low)
+        s_high = min(255, color_s + self.s_thresh_high)
 
-        upper_bound = np.array(
-            [
-                self.hue_high,
-                self.sat_high,
-                self.val_high,
-            ],
-            dtype=np.uint8,
-        )
+        v_low = max(0, color_v - self.v_thresh_low)
+        v_high = min(255, color_v + self.v_thresh_high)
 
-        mask = cv2.inRange(src_hsv, lower_bound, upper_bound)
+        lower_sv = np.array([s_low, v_low])
+        upper_sv = np.array([s_high, v_high])
 
-        return mask
+        if h_low <= 0 and h_high >= 179:
+            # Entire hue spectrum
+            lower = np.array([0, s_low, v_low])
+            upper = np.array([179, s_high, v_high])
 
-    def get_mask_from_color(self, src, color, threshold=15):
-        src_hsv = cv2.cvtColor(src, cv2.COLOR_BGR2HSV)
+            self.get_logger().debug(
+                f"HSV mask | ALL H | S {s_low}:{s_high} | V {v_low}:{v_high}"
+            )
 
-        # color_r = color[0]
-        # color_g = color[1]
-        # color_B = color[2]
+            return cv2.inRange(img_hsv, lower, upper)
 
-        # color_h, color_s, color_v = colorsys.rgb_to_hsv(
-        #     r=(color_r / 255), g=(color_g / 255), b=(color_B / 255)
-        # )
-        # color_h = int(color_h * 179)
-        # color_s = int(color_s * 255)
-        # color_v = int(color_v * 255)
+        elif h_low < 0:
+            # Wraps through 0
+            lower_1 = np.array([0, s_low, v_low])
+            upper_1 = np.array([h_high, s_high, v_high])
 
-        # lower = None
-        # upper = None
+            lower_2 = np.array([180 + h_low, s_low, v_low])
+            upper_2 = np.array([179, s_high, v_high])
 
-        # src_h = src_hsv[:, :, 0]
-        # src_h_new = src_h
+            self.get_logger().debug(
+                f"HSV mask | H {180 + h_low}:179 + 0:{h_high} | "
+                f"S {s_low}:{s_high} | V {v_low}:{v_high}"
+            )
 
-        # # grayscale - use value
-        # if color_r == color_g == color_B:
-        #     lower = np.array([0, 0, max(0, color_v - threshold)])
-        #     upper = np.array([255, 255, min(255, color_v + threshold)])
-        # else:
+            mask1 = cv2.inRange(img_hsv, lower_1, upper_1)
+            mask2 = cv2.inRange(img_hsv, lower_2, upper_2)
 
-        #     if threshold >= 89:
-        #         lower = 0
-        #         upper = 179
-        #     # leftside OOB
-        #     elif color_h - threshold < 0:
-        #         diff = abs(threshold - color_h)
-        #         lower = 0
-        #         upper = color_h + diff
-        #         src_h_new = cv2.add(src_h, diff)
-        #     # rightside OOB
-        #     elif color_h + threshold > 179:
-        #         diff = abs(color_h + threshold - 179)
-        #         lower = color_h - diff
-        #         upper = 179
-        #         src_h_new = cv2.add(src_h, diff)
-        #     else:
-        #         lower = color_h - threshold
-        #         upper = color_h + threshold
+            return cv2.bitwise_or(mask1, mask2)
 
-        # src_hsv_new = cv2.merge([src_h_new, src_hsv[:, :, 1], src_hsv[:, :, 2]])
+        elif h_high > 179:
+            # Wraps through 179 -> 0
+            lower_1 = np.array([h_low, s_low, v_low])
+            upper_1 = np.array([179, s_high, v_high])
 
-        lower_bound = np.array(
-            [
-                self.hue_low,
-                self.sat_low,
-                self.val_low
-                ]
-        )
+            lower_2 = np.array([0, s_low, v_low])
+            upper_2 = np.array([h_high - 180, s_high, v_high])
 
-        upper_bound = np.array(
-            [
-                self.hue_high,
-                self.sat_high,
-                self.val_high
-                ]
-        )
+            self.get_logger().debug(
+                f"HSV mask | H {h_low}:179 + 0:{h_high - 180} | "
+                f"S {s_low}:{s_high} | V {v_low}:{v_high}"
+            )
 
+            mask1 = cv2.inRange(img_hsv, lower_1, upper_1)
+            mask2 = cv2.inRange(img_hsv, lower_2, upper_2)
+
+            return cv2.bitwise_or(mask1, mask2)
+
+        else:
+            # Normal, non-wrapping range
+            lower = np.array([h_low, s_low, v_low])
+            upper = np.array([h_high, s_high, v_high])
+
+            self.get_logger().debug(
+                f"HSV mask | H {h_low}:{h_high} | "
+                f"S {s_low}:{s_high} | V {v_low}:{v_high}"
+            )
+
+            return cv2.inRange(img_hsv, lower, upper)
+
+        # # src_h = src_hsv[:, :, 0]
+        # # src_h_new = src_h
+
+        # # # grayscale - use value
+        # # if color_r == color_g == color_B:
+        # #     lower = np.array([0, 0, max(0, color_v - threshold)])
+        # #     upper = np.array([255, 255, min(255, color_v + threshold)])
+        # # else:
+
+        # #     if threshold >= 89:
+        # #         lower = 0
+        # #         upper = 179
+        # #     # leftside OOB
+        # #     elif color_h - threshold < 0:
+        # #         diff = abs(threshold - color_h)
+        # #         lower = 0
+        # #         upper = color_h + diff
+        # #         src_h_new = cv2.add(src_h, diff)
+        # #     # rightside OOB
+        # #     elif color_h + threshold > 179:
+        # #         diff = abs(color_h + threshold - 179)
+        # #         lower = color_h - diff
+        # #         upper = 179
+        # #         src_h_new = cv2.add(src_h, diff)
+        # #     else:
+        # #         lower = color_h - threshold
+        # #         upper = color_h + threshold
+
+        # # src_hsv_new = cv2.merge([src_h_new, src_hsv[:, :, 1], src_hsv[:, :, 2]])
 
         # lower_bound = np.array(
-        #     [
-        #         lower,
-        #         max(0, color_s - int(threshold * 255 / 100)),
-        #         max(0, int(color_v * (1 - threshold / 100.0))),
-        #     ]
+        #     [self.h_thresh_low, self.s_thresh_low, self.v_thresh_low]
         # )
+
         # upper_bound = np.array(
-        #     [
-        #         upper,
-        #         min(255, color_s + int(threshold * 255 / 100)),
-        #         min(255, int(color_v * (1 + threshold / 100.0))),
-        #     ]
+        #     [self.h_thresh_high, self.s_thresh_high, self.v_thresh_high]
         # )
 
+        # # lower_bound = np.array(
+        # #     [
+        # #         lower,
+        # #         max(0, color_s - int(threshold * 255 / 100)),
+        # #         max(0, int(color_v * (1 - threshold / 100.0))),
+        # #     ]
+        # # )
+        # # upper_bound = np.array(
+        # #     [
+        # #         upper,
+        # #         min(255, color_s + int(threshold * 255 / 100)),
+        # #         min(255, int(color_v * (1 + threshold / 100.0))),
+        # #     ]
+        # # )
 
-        mask = cv2.inRange(src_hsv, lower_bound, upper_bound)
+        # mask = cv2.inRange(img_hsv, lower_bound, upper_bound)
 
-        return mask
+        # return mask
 
     def _setup_parameters(self):
         self.declare_parameter(
@@ -1058,7 +1092,7 @@ class GridProcessor(Node):
         )
 
         self.declare_parameter(
-            name="hue_low",
+            name="h_thresh_low",
             value=0,
             descriptor=ParameterDescriptor(
                 description="Lower bound of the hue threshold for line detection.",
@@ -1072,7 +1106,7 @@ class GridProcessor(Node):
         )
 
         self.declare_parameter(
-            name="hue_high",
+            name="h_thresh_high",
             value=0,
             descriptor=ParameterDescriptor(
                 description="Upper bound of the hue threshold for line detection.",
@@ -1086,7 +1120,7 @@ class GridProcessor(Node):
         )
 
         self.declare_parameter(
-            name="sat_low",
+            name="s_thresh_low",
             value=0,
             descriptor=ParameterDescriptor(
                 description="Lower bound of the saturation threshold for line detection.",
@@ -1100,7 +1134,7 @@ class GridProcessor(Node):
         )
 
         self.declare_parameter(
-            name="sat_high",
+            name="s_thresh_high",
             value=0,
             descriptor=ParameterDescriptor(
                 description="Upper bound of the saturation threshold for line detection.",
@@ -1114,7 +1148,7 @@ class GridProcessor(Node):
         )
 
         self.declare_parameter(
-            name="val_low",
+            name="v_thresh_low",
             value=0,
             descriptor=ParameterDescriptor(
                 description="Lower bound of the saturation threshold for line detection.",
@@ -1128,7 +1162,7 @@ class GridProcessor(Node):
         )
 
         self.declare_parameter(
-            name="val_high",
+            name="v_thresh_high",
             value=0,
             descriptor=ParameterDescriptor(
                 description="Upper bound of the saturation threshold for line detection.",
@@ -1169,13 +1203,13 @@ class GridProcessor(Node):
         self.midline_step = self.get_parameter("midline_step").value
         self.followed_node_offset = self.get_parameter("followed_node_offset").value
 
-        self.hue_low = self.get_parameter("hue_low").value
-        self.sat_low = self.get_parameter("sat_low").value
-        self.val_low = self.get_parameter("val_low").value
+        self.h_thresh_low = self.get_parameter("h_thresh_low").value
+        self.s_thresh_low = self.get_parameter("s_thresh_low").value
+        self.v_thresh_low = self.get_parameter("v_thresh_low").value
 
-        self.hue_high = self.get_parameter("hue_high").value
-        self.sat_high = self.get_parameter("sat_high").value
-        self.val_high = self.get_parameter("val_high").value
+        self.h_thresh_high = self.get_parameter("h_thresh_high").value
+        self.s_thresh_high = self.get_parameter("s_thresh_high").value
+        self.v_thresh_high = self.get_parameter("v_thresh_high").value
 
         result: ListParametersResult = self.list_parameters([], depth=0)
 
