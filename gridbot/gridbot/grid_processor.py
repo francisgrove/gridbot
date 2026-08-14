@@ -190,7 +190,7 @@ class GridProcessor(Node):
             self._prepare_rois()
 
         upper_edge, top_edge, direction = None, None, None
-        # upper_edge, top_edge, direction = self.aruco_tracking(frame)
+        upper_edge, top_edge, direction = self.aruco_tracking(frame)
 
         centerline, target_node = self.line_tracking(frame)
         self.turning_tracking(frame)
@@ -467,8 +467,6 @@ class GridProcessor(Node):
         max_line_mask = np.zeros_like(frame)
         cv2.drawContours(max_line_mask, [max_line_contour], -1, (255, 255, 255), -1)
 
-        self._make_window("test", max_line_mask)
-        cv2.waitKey(1)
 
         mask_msg = bridge.cv2_to_compressed_imgmsg(max_line_mask)
 
