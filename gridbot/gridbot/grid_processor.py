@@ -75,12 +75,12 @@ class GridProcessor(Node):
     clahe: cv2.CLAHE
 
     h_thresh_low: int = 0
-    s_thresh_low: int = 0
-    v_thresh_low: int = 0
+    s_low: int = 0
+    v_low: int = 0
 
     h_thresh_high: int = 0
-    s_thresh_high: int = 0
-    v_thresh_high: int = 0
+    s_high: int = 0
+    v_high: int = 0
 
     handler: ParameterEventHandler
 
@@ -143,11 +143,11 @@ class GridProcessor(Node):
 
         for parameter_name in (
             "h_thresh_low",
-            "s_thresh_low",
-            "v_thresh_low",
+            "s_low",
+            "v_low",
             "h_thresh_high",
-            "s_thresh_high",
-            "v_thresh_high",
+            "s_high",
+            "v_high",
             "line_color",
         ):
             self.handler.add_parameter_callback(
@@ -168,8 +168,15 @@ class GridProcessor(Node):
             cmprs_img_msg=msg, desired_encoding="bgr8"
         )
 
+        img_hsv = cv2.cvtColor(frame_raw, cv2.COLOR_BGR2HSV)
+        
+        h, s, v = cv2.split(img_hsv)
+        v = self.clahe.apply(v)
+        img_hsv = cv2.merge([h, s, v])
 
-        frame = frame_raw
+        equalized = cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR)
+
+        frame = equalized
 
         if frame is None:
             self.get_logger().error("Error while trying to read frame.")
@@ -772,10 +779,6 @@ class GridProcessor(Node):
     def get_mask_from_color(self, img, color):
         img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-        h, s, v = cv2.split(img_hsv)
-        v = self.clahe.apply(v)
-        img_hsv = cv2.merge([h, s, v])
-
         # color is RGB
         color_h, color_s, color_v = colorsys.rgb_to_hsv(
             r=color[0] / 255.0,
@@ -790,14 +793,12 @@ class GridProcessor(Node):
         h_low = color_h - self.h_thresh_low
         h_high = color_h + self.h_thresh_high
 
-        s_low = max(0, color_s - self.s_thresh_low)
-        s_high = min(255, color_s + self.s_thresh_high)
+        s_low = max(0, self.s_low)
+        s_high = min(255, self.s_high)
 
-        v_low = max(0, color_v - self.v_thresh_low)
-        v_high = min(255, color_v + self.v_thresh_high)
+        v_low = max(0, self.v_low)
+        v_high = min(255,self.v_high)
 
-        lower_sv = np.array([s_low, v_low])
-        upper_sv = np.array([s_high, v_high])
 
         if h_low <= 0 and h_high >= 179:
             # Entire hue spectrum
@@ -889,11 +890,11 @@ class GridProcessor(Node):
         # # src_hsv_new = cv2.merge([src_h_new, src_hsv[:, :, 1], src_hsv[:, :, 2]])
 
         # lower_bound = np.array(
-        #     [self.h_thresh_low, self.s_thresh_low, self.v_thresh_low]
+        #     [self.h_thresh_low, self.s_low, self.v_low]
         # )
 
         # upper_bound = np.array(
-        #     [self.h_thresh_high, self.s_thresh_high, self.v_thresh_high]
+        #     [self.h_thresh_high, self.s_high, self.v_high]
         # )
 
         # # lower_bound = np.array(
@@ -1121,7 +1122,7 @@ class GridProcessor(Node):
         )
 
         self.declare_parameter(
-            name="s_thresh_low",
+            name="s_low",
             value=0,
             descriptor=ParameterDescriptor(
                 description="Lower bound of the saturation threshold for line detection.",
@@ -1135,7 +1136,7 @@ class GridProcessor(Node):
         )
 
         self.declare_parameter(
-            name="s_thresh_high",
+            name="s_high",
             value=0,
             descriptor=ParameterDescriptor(
                 description="Upper bound of the saturation threshold for line detection.",
@@ -1149,7 +1150,7 @@ class GridProcessor(Node):
         )
 
         self.declare_parameter(
-            name="v_thresh_low",
+            name="v_low",
             value=0,
             descriptor=ParameterDescriptor(
                 description="Lower bound of the saturation threshold for line detection.",
@@ -1163,7 +1164,7 @@ class GridProcessor(Node):
         )
 
         self.declare_parameter(
-            name="v_thresh_high",
+            name="v_high",
             value=0,
             descriptor=ParameterDescriptor(
                 description="Upper bound of the saturation threshold for line detection.",
@@ -1205,12 +1206,12 @@ class GridProcessor(Node):
         self.followed_node_offset = self.get_parameter("followed_node_offset").value
 
         self.h_thresh_low = self.get_parameter("h_thresh_low").value
-        self.s_thresh_low = self.get_parameter("s_thresh_low").value
-        self.v_thresh_low = self.get_parameter("v_thresh_low").value
+        self.s_low = self.get_parameter("s_low").value
+        self.v_low = self.get_parameter("v_low").value
 
         self.h_thresh_high = self.get_parameter("h_thresh_high").value
-        self.s_thresh_high = self.get_parameter("s_thresh_high").value
-        self.v_thresh_high = self.get_parameter("v_thresh_high").value
+        self.s_high = self.get_parameter("s_high").value
+        self.v_high = self.get_parameter("v_high").value
 
         result: ListParametersResult = self.list_parameters([], depth=0)
 

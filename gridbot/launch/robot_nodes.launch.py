@@ -2,9 +2,16 @@ import os
 
 from launch import LaunchDescription
 
+from launch.actions import (
+    IncludeLaunchDescription,
+    SetEnvironmentVariable,
+    DeclareLaunchArgument,
+)
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node, ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
+from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition, UnlessCondition
 
 
 def generate_launch_description():
@@ -14,7 +21,12 @@ def generate_launch_description():
     motor_driver_config = os.path.join(pkg_share, "config", "motor_driver_params.yaml")
 
     camera_name = "camera"
-    
+
+    motors_arg = DeclareLaunchArgument(
+        "motors",
+        default_value="true",
+        description="Use Motor Driver node. (useful to turn off when testing)",
+    )
 
     camera_node = Node(
         package="camera_ros",
@@ -48,9 +60,8 @@ def generate_launch_description():
                 ("in/image_raw", f"{camera_name}/image_rect"),
                 ("in/camera_info", f"{camera_name}/camera_info"),
                 ("out/image_raw", f"{camera_name}/image_downsized"),
-                ("out/camera_info", f"{camera_name}/downsized_camera_info")
+                ("out/camera_info", f"{camera_name}/downsized_camera_info"),
             ],
-            
             parameters=[
                 {
                     "decimation_x": 2,
@@ -68,8 +79,6 @@ def generate_launch_description():
         composable_node_descriptions=composable_nodes,
     )  # pyright: ignore[reportCallIssue]
 
-    # flip, as the robot"s camera is physically upside-down
-
     motor_driver = Node(
         package="gridbot",
         executable="motor_driver",
@@ -77,10 +86,12 @@ def generate_launch_description():
         namespace=pkg_name,
         output="screen",
         parameters=[motor_driver_config],
+        condition=IfCondition(LaunchConfiguration("motors")),
     )
 
     return LaunchDescription(
         [
+            motors_arg,
             camera_node,
             container,
             motor_driver,
