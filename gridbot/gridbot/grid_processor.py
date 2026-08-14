@@ -168,7 +168,6 @@ class GridProcessor(Node):
             cmprs_img_msg=msg, desired_encoding="bgr8"
         )
 
-        # frame = self._quantize_image(frame_raw, divider=64)
 
         frame = frame_raw
 
@@ -431,7 +430,7 @@ class GridProcessor(Node):
         cv2.namedWindow(winname=name, flags=cv2.WINDOW_FREERATIO)
         cv2.imshow(winname=name, mat=src)
 
-    def line_tracking(self, frame: np.array):
+    def line_tracking(self, frame_raw: np.array):
         """
         1. Masks out the frame by the line_color. Converts each bit island to a contour.
         2. Picks the contour by these criteria:
@@ -440,6 +439,8 @@ class GridProcessor(Node):
         3. For this contour, finds a centerline node chain
         4. For picked node, finds its offset and sends it.
         """
+
+        frame = cv2.medianBlur(frame_raw, 5)
 
         camera_center = (self.img_w // 2, self.img_h // 2)
 

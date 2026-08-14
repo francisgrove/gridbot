@@ -1,7 +1,7 @@
 /gridbot/grid_processor:
   ros__parameters:
-    # camera_topic: "camera/image_rect/compressed"
-    camera_topic: "camera/image_raw/compressed"
+    camera_topic: "camera/image_rect/compressed"
+    # camera_topic: "camera/image_raw/compressed"
     line_offset_topic: "line_offset"
     tracked_image_topic: "camera/image_tracked/compressed"
     aruco_topic: "aruco"
@@ -12,9 +12,9 @@
     line_color: [120, 40, 40]
 
     h_thresh_low: 50
-    h_thresh_high: 50
-    s_thresh_low: 50
-    s_thresh_high: 50
+    h_thresh_high: 0
+    s_thresh_low: 100
+    s_thresh_high: 100
     v_thresh_low: 50
     v_thresh_high: 50
 
