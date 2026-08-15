@@ -45,7 +45,7 @@ setup(
         ),
     ]
     + models,
-    install_requires=["setuptools"],
+    install_requires=["setuptools", "gpiozero", "opencv-python"],
     zip_safe=True,
     maintainer="Francis",
     maintainer_email="francis.grove@pm.me",

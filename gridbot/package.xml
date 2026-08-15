@@ -8,15 +8,14 @@
   <license>Apache-2.0</license>
 
   <depend>rclpy</depend>
-  <depend>python3-opencv</depend>
   <depend>cv_bridge</depend>
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>ros2launch</depend>
-  <depend>python-rpi.gpio</depend>
-  <depend>foxglove-bridge</depend>
+  <depend>foxglove_bridge</depend>
   <depend>image_transport</depend>
-  <depend>gridbot_interfaces</depend>
+  <depend>compressed_image_transport</depend>
+  <depend>image_proc</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
