@@ -14,7 +14,7 @@ Build the [camera_ros package (Pi)](https://github.com/christianrauch/camera_ros
 
 1. Clone this repository into your ros2 workspace's `src` folder: 
 ```bash
-git clone https://github.com/francisgrove/gridbot.git
+git clone https://github.com/francisgrove/gridbot.git .
 ```
 
 2. Build the `gridbot_interfaces` package first:
