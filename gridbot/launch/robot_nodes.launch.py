@@ -11,7 +11,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node, ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
 from launch.substitutions import LaunchConfiguration
-from launch.conditions import IfCondition, UnlessCondition
+from launch.conditions import IfCondition
 
 
 def generate_launch_description():
@@ -77,7 +77,7 @@ def generate_launch_description():
         executable="component_container",
         namespace=pkg_name,
         composable_node_descriptions=composable_nodes,
-    )  # pyright: ignore[reportCallIssue]
+    )
 
     motor_driver = Node(
         package="gridbot",

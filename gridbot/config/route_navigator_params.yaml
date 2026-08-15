@@ -7,18 +7,18 @@
     twist_topic: "cmd_vel"
     map_graph_filepath: "config/map_graph.yaml" 
   
-    default_pos: "A2"
-    default_dir: "south"
+    default_pos: "A1"
+    default_dir: "north"
 
     pause_time: 1.0 
     lost_timeout: 5.0
    
     frequency: 0.005
     k_p: 1.0
-    k_i: 0.0
-    k_d: 0.0
+    k_i: 0.01
+    k_d: 0.01
 
-    linear_vel: 0.25
+    linear_vel: 0.5
     angular_vel: 1.0
 
     linear_vel_multiplier: 0.1

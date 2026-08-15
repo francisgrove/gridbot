@@ -10,8 +10,7 @@ from launch.substitutions import LaunchConfiguration
 
 from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory
-
+from launch.conditions import IfCondition
 
 def generate_launch_description():
 
@@ -23,6 +22,12 @@ def generate_launch_description():
     )
 
     rosout_level = LaunchConfiguration("rosout_level")
+
+    foxglove_arg = DeclareLaunchArgument(
+        "foxglove",
+        default_value="true",
+        description="Launch Foxglove server",
+    )
 
     pkg_name = "gridbot"
     pkg_share = get_package_share_directory(pkg_name)
@@ -69,16 +74,20 @@ def generate_launch_description():
 
     foxglove_pkg_share = get_package_share_directory("foxglove_bridge")
     foxglove_launch_path = os.path.join(
-        foxglove_pkg_share, "launch", "foxglove_bridge_launch.xml"
+        foxglove_pkg_share,
+        "launch",
+        "foxglove_bridge_launch.xml",
     )
 
     foxglove_launch = IncludeLaunchDescription(
-        XMLLaunchDescriptionSource(foxglove_launch_path)
+        XMLLaunchDescriptionSource(foxglove_launch_path),
+        condition=IfCondition(LaunchConfiguration("foxglove")),
     )
 
     return LaunchDescription(
         [
             rosout_level_arg,
+            foxglove_arg,
             grid_processor,
             route_navigator,
             foxglove_launch,

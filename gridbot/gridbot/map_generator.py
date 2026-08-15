@@ -10,9 +10,6 @@ import gridbot.gridbot_helpers as gridbot
 import cv2
 import numpy as np
 
-from itertools import takewhile
-
-
 class _MapEdge:
     fr: str
     to: str
@@ -72,6 +69,8 @@ class MapGenerator(Node):
 
     removed_nodes: list[str]
     edges: list[str]
+
+    use_weights: bool
 
     node_map: dict[_MapNode, list[_MapEdge]] = {}
 
@@ -304,6 +303,16 @@ class MapGenerator(Node):
             ),
         )
 
+        self.declare_parameter(
+            "use_weights",
+            False,
+            ParameterDescriptor(
+                description=(
+                    "Whether to use weights provided in edges, or to calculate them from node positions."
+                )
+            )
+        )
+
         self.yaml_save_path = self.get_parameter("yaml_save_path").value
         self.img_save_path = self.get_parameter("img_save_path").value
         self.tag_size = self.get_parameter("tag_size").value
@@ -334,6 +343,8 @@ class MapGenerator(Node):
 
         self.removed_nodes = self.get_parameter("removed_nodes").value
         self.edges = self.get_parameter("edges").value
+
+        self.use_weights = self.get_parameter("use_weights").value
 
         result: ListParametersResult = self.list_parameters([], depth=0)
 
@@ -376,6 +387,16 @@ class MapGenerator(Node):
 
                 self.get_logger().info(f"Removed node {rm} from graph.")
 
+    def _are_linear(self, node_a: str, node_b: str) -> bool:
+        """
+        Checks if two nodes exist on either the same row or column.
+        """
+
+        xa, ya = gridbot.node_to_coords(node_a)
+        xb, yb = gridbot.node_to_coords(node_b)
+
+        return xa == xb or ya == yb
+
     def _add_edges(self):
         for edge in self.edges:
             parts = edge.split(",")
@@ -386,12 +407,7 @@ class MapGenerator(Node):
 
             fr = parts[0]
             to = parts[1]
-
-            try:
-                weight = int(parts[2].strip())
-            except ValueError:
-                self.get_logger().warning(f"Invalid edge weight: {edge}")
-                continue
+            weight_str = int(parts[2])
 
             from_node = next(
                 (node for node in self.node_map if node.label == fr),
@@ -405,39 +421,31 @@ class MapGenerator(Node):
 
             if from_node is None:
                 self.get_logger().warn(
-                    f"Node {fr} (from) doesn't exist in graph. Skipping edge..."
+                    f"Node {fr} (from) doesn't exist in graph. Skipping..."
                 )
                 continue
 
             if to_node is None:
                 self.get_logger().warn(
-                    f"Node {to} (to) doesn't exist in graph. Skipping edge..."
+                    f"Node {to} (to) doesn't exist in graph. Skipping..."
                 )
                 continue
 
-            if not self._are_linear(fr, to):
-                self.get_logger().warn(
-                    f"Nodes {fr} (from) and {to} (to) aren't linear on the graph. Skipping edge..."
-                )
+            if not self._are_linear(node_a=fr, node_b=to):
+                self.get_logger().warn(f"Edge {edge} not linear. Skipping...")
                 continue
+
+            fr_x, fr_y = gridbot.node_to_coords(fr)
+            to_x, to_y = gridbot.node_to_coords(to)
+
+            weight = 0
+
+            if self.use_weights:
+                weight=weight_str
+            else:
+                weight = abs(to_y - fr_y) + abs(to_x - fr_x)
 
             self.node_map[from_node].append(_MapEdge(fr=fr, to=to, weight=weight))
-
-    def _are_linear(self, a: str, b: str) -> bool:
-        """
-        Returns false if neither letters nor numbers in the nodes match.
-        """
-
-        a_cut = len(list(takewhile(str.isalpha, a)))
-        b_cut = len(list(takewhile(str.isalpha, b)))
-
-        a_col = a[:a_cut]
-        a_row = a[a_cut:]
-
-        b_col = b[:b_cut]
-        b_row = b[b_cut:]
-
-        return True if a_col == b_col or a_row == b_row else False
 
     def _generate_image(self):
         """
@@ -452,8 +460,6 @@ class MapGenerator(Node):
         min_y = min(node_ys)
         max_y = max(node_ys)
 
-        half_tag = self.tag_size // 2
-
         width = (max_x - min_x) + self.tag_size
         height = (max_y - min_y) + self.tag_size
 
@@ -462,12 +468,6 @@ class MapGenerator(Node):
             255,
             dtype=np.uint8,
         )
-
-        def transform_x(x):
-            return x - min_x + half_tag
-
-        def transform_y(y):
-            return max_y - y + half_tag
 
         for node_from, edges in self.node_map.items():
             for edge in edges:
@@ -480,11 +480,11 @@ class MapGenerator(Node):
                 if node_to is None:
                     continue
 
-                from_x = transform_x(node_from.x)
-                from_y = transform_y(node_from.y)
+                from_x = node_from.x
+                from_y = height - node_from.y
 
-                to_x = transform_x(node_to.x)
-                to_y = transform_y(node_to.y)
+                to_x = node_to.x
+                to_y = height - node_to.y
 
                 cv2.line(
                     image,
@@ -495,8 +495,11 @@ class MapGenerator(Node):
                     cv2.LINE_4,
                 )
 
-                text_x_offset = self.text_padding if from_x == to_x else 0
-                text_y_offset = self.text_padding if from_y == to_y else 0
+                y_turn = -1 if from_y == min_y else 1
+                x_turn = -1 if from_x == min_x else 1
+
+                text_x_offset = x_turn * self.text_padding if from_x == to_x else 0
+                text_y_offset = y_turn * self.text_padding if from_y == to_y else 0
 
                 text_x = (from_x + to_x) // 2 - text_x_offset
                 text_y = (from_y + to_y) // 2 - text_y_offset
@@ -534,14 +537,16 @@ class MapGenerator(Node):
                 cv2.COLOR_GRAY2BGR,
             )
 
-            center_x = transform_x(node.x)
-            center_y = transform_y(node.y)
+            
+            center_x = node.x
+            center_y = height - node.y
 
-            x0 = center_x - half_tag
-            y0 = center_y - half_tag
+            x0 = center_x - self.tag_size // 2
+            y0 = center_y - self.tag_size // 2
 
             x1 = x0 + self.tag_size
             y1 = y0 + self.tag_size
+
 
             image[y0:y1, x0:x1] = marker
 

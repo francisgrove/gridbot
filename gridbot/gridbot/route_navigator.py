@@ -1,11 +1,12 @@
 import rclpy
 from rclpy.node import Node
-from typing import Any, cast
 from rcl_interfaces.msg import (
     ParameterDescriptor,
     FloatingPointRange,
     ListParametersResult,
 )
+import rclpy.parameter
+from rclpy.parameter_event_handler import ParameterEventHandler
 from rclpy.timer import Timer
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from std_msgs.msg import Float64, Int8, String
@@ -65,10 +66,10 @@ class RouteNavigator(Node):
     lost_timeout: float
 
     curr_error: float
-    sum_error: float
+    integ_error: float
     prev_error: float
 
-    prev_time: int | None
+    prev_time: int
     pid_output: float
     k_p: float
     k_i: float
@@ -82,7 +83,6 @@ class RouteNavigator(Node):
 
     robot_route: list[RouteNode] = []
 
-    # state machine var
     curr_state: gridbot.RobotState
 
     pause_start: int
@@ -95,6 +95,7 @@ class RouteNavigator(Node):
     clear_nodes: bool
 
     twist_timer: Timer
+    handler: ParameterEventHandler
 
     def __init__(self, node_name: str):
         super().__init__(node_name)
@@ -102,14 +103,14 @@ class RouteNavigator(Node):
         self.prev_time = 0
         self.prev_error = 0.0
 
-        self.sum_error = 0.0
+        self.integ_error = 0.0
         self.curr_error = 0.0
 
         self.pid_output = 0.0
 
         self.curr_state = gridbot.RobotState.IDLE
 
-        self.last_line_observation = gridbot.LineObservation.NONE
+        self.last_line_observation = None
 
         self.clear_nodes = False
         self.node_reached = False
@@ -165,7 +166,29 @@ class RouteNavigator(Node):
             timer_period_sec=(self.frequency), callback=self.timer_callback
         )
 
+        self.handler = ParameterEventHandler(self)
+
+        for parameter_name in (
+            "k_p",
+            "k_i",
+            "k_d",
+            "linear_vel_multiplier",
+            "angular_vel_multiplier",
+        ):
+            self.handler.add_parameter_callback(
+                parameter_name=parameter_name,
+                node_name=node_name,
+                callback=self.parameter_callback,
+            )
+
         self.context.on_shutdown(self._cleanup)
+
+    def parameter_callback(self, p: rclpy.parameter.Parameter) -> None:
+        value = rclpy.parameter.parameter_value_to_python(p.value)
+
+        self.get_logger().info(f"Received an update to parameter: {p.name}: {value}")
+
+        setattr(self, p.name, value)
 
     def user_cmd_callback(self, msg: String):
 
@@ -197,24 +220,24 @@ class RouteNavigator(Node):
 
         now = self.get_clock().now().nanoseconds
 
-        if self.prev_time is None:
+        if self.prev_time == 0:
             self.prev_time = now
             self.prev_error = error
-
             return
 
         duration = now - self.prev_time
         dt = duration * 1e-9
 
-        if dt < 1e-6:
-            return
+        
+        self.integ_error += error * dt
+        deriv_error = (error - self.prev_error) / dt
 
-        self.sum_error += error * dt
-        drv_error = (error - self.prev_error) / dt
-
-        self.pid_output = (
-            self.k_p * error + self.k_i * self.sum_error + self.k_d * drv_error
+        pid_output = (
+            self.k_p * error + self.k_i * self.integ_error + self.k_d * deriv_error
         )
+
+        if pid_output != self.pid_output:
+            self.pid_output = pid_output
 
         self.prev_error = error
         self.prev_time = now
@@ -227,7 +250,7 @@ class RouteNavigator(Node):
         dir = int(msg.direction)
 
         self.get_logger().info(
-            f"Received ArUco tag data:\nTag: {id} -> {gridbot.aruco_to_node(id, self.graph_height)}\nDirection: {dir} -> {gridbot.ArucoDirection(dir).name.capitalize()}"
+            f"Received ArUco data:\n\tTag: {id} -> {gridbot.aruco_to_node(id, self.graph_height)}\n\tDirection: {dir} -> {gridbot.ArucoDirection(dir).name.capitalize()}"
         )
 
         expected_node = self.robot_route[0].name
@@ -237,6 +260,7 @@ class RouteNavigator(Node):
         if received_node != expected_node:
 
             self.get_logger().info(f"Expected {expected_node}, but got {received_node}")
+
             # obtain all nodes that have priority
             priority_nodes = [
                 node.name for node in self.robot_route if node.priority == 1
@@ -259,17 +283,10 @@ class RouteNavigator(Node):
 
     def line_turning_callback(self, msg: Int8) -> None:
 
-        if self.curr_state not in [gridbot.RobotState.TURNING]:
+        if self.curr_state != gridbot.RobotState.TURNING:
             return
 
         flags = gridbot.LineObservation(msg.data)
-
-        if self.last_line_observation is None:
-            self.last_line_observation = flags
-        elif self.last_line_observation == flags:
-            return
-
-        curr_center = flags & gridbot.LineObservation.CENTER
 
         self.get_logger().info(
             f"Road flags:\n [{int(bool(flags & gridbot.LineObservation.LEFT))} "
@@ -277,11 +294,18 @@ class RouteNavigator(Node):
             f"{int(bool(flags & gridbot.LineObservation.RIGHT))}]"
         )
 
+        if self.last_line_observation is None:
+            self.last_line_observation = flags
+            return
+        elif self.last_line_observation == flags:
+            return
+
+        curr_center = flags & gridbot.LineObservation.CENTER
+
         if (
             not curr_center
             and self.last_line_observation & gridbot.LineObservation.CENTER
         ):
-            self.get_logger().debug("Center lost")
             self.center_found = False
 
         # Only count a line being found if previously the line wasn't in the center
@@ -289,7 +313,6 @@ class RouteNavigator(Node):
             curr_center
             and not self.last_line_observation & gridbot.LineObservation.CENTER
         ):
-            self.get_logger().debug("Center found")
             self.center_found = True
 
         self.last_line_observation = flags
@@ -345,9 +368,7 @@ class RouteNavigator(Node):
                 )
 
                 if self.node_reached:
-                    self.get_logger().info(
-                        f"Node reached - Robot at {self.curr_pos}, looking {gridbot.ArucoDirection(self.curr_dir).name.capitalize()}"
-                    )
+                    self.get_logger().info(f"Node {self.curr_pos} reached.")
 
                     self.node_reached = False
                     self.curr_state = gridbot.RobotState.PAUSED
@@ -366,9 +387,7 @@ class RouteNavigator(Node):
                 )
 
                 if self.center_found:
-                    self.get_logger().info(
-                        f"Centered at line - Robot at {self.curr_pos}, looking {gridbot.ArucoDirection(self.curr_dir).name.capitalize()}"
-                    )
+                    self.get_logger().info(f"Line centered")
                     self.center_found = False
                     self.curr_state = gridbot.RobotState.PAUSED
                     self.pause_start = self.get_clock().now().nanoseconds
@@ -396,7 +415,7 @@ class RouteNavigator(Node):
 
                     if len(self.robot_route) > 0:
                         self.get_logger().info(
-                            f"Next route plan: {self.robot_route[0].directions[0].name.capitalize()} for node {self.robot_route[0]}"
+                            f"Next route plan: {self.robot_route[0].directions[0].name} for node {self.robot_route[0].name}"
                         )
                     else:
                         self.get_logger().info(f"Finished route.")
@@ -602,7 +621,7 @@ class RouteNavigator(Node):
 
         with open(yaml_path) as stream:
             try:
-                load = cast(dict[str, Any] | None, yaml.safe_load(stream))
+                load = yaml.safe_load(stream)
 
                 if load is None:
                     self.get_logger().error("YAML file is empty.")
@@ -635,17 +654,14 @@ class RouteNavigator(Node):
         self.angular_vel_multiplier = self.get_parameter("angular_vel_multiplier").value
 
         result: ListParametersResult = self.list_parameters([], depth=0)
-
         parameters = self.get_parameters(list(result.names))
 
-        self.get_logger().info("=" * 40)
         for parameter in parameters:
             self.get_logger().info(f"{parameter.name}: {parameter.value}")
 
         self.get_logger().info(
-            "graph:\n" + "\n".join(f"{k}: {v}" for k, v in self.graph.items())
+            "graph:\n" + "\n".join(f"\t{k}: {v}" for k, v in self.graph.items())
         )
-        self.get_logger().info("=" * 40)
 
     def _cleanup(self):
         self.twist_pub.publish(Twist())
@@ -723,11 +739,11 @@ class RouteNavigator(Node):
                         direction = self._get_direction_between(curr_node, neighbour)
 
                         if direction == left_dir:
-                            self.get_logger().info(
+                            self.get_logger().debug(
                                 f"{neighbour} to the left of {curr_node}"
                             )
                         if direction == right_dir:
-                            self.get_logger().info(
+                            self.get_logger().debug(
                                 f"{neighbour} to the right of {curr_node}"
                             )
 
@@ -741,13 +757,13 @@ class RouteNavigator(Node):
                         for neighbour in neighbours
                     )
 
-                    if has_right and not has_left:
+                    if has_right and has_left:
+                        next_node.directions.append(gridbot.RobotDirection.TURN_LEFT)
+                        next_node.directions.append(gridbot.RobotDirection.TURN_LEFT)
+                    elif has_right and not has_left:
                         next_node.directions.append(gridbot.RobotDirection.TURN_RIGHT)
                         next_node.directions.append(gridbot.RobotDirection.TURN_RIGHT)
                     elif not has_right and has_left:
-                        next_node.directions.append(gridbot.RobotDirection.TURN_LEFT)
-                        next_node.directions.append(gridbot.RobotDirection.TURN_LEFT)
-                    elif has_right and has_left:
                         next_node.directions.append(gridbot.RobotDirection.TURN_LEFT)
                         next_node.directions.append(gridbot.RobotDirection.TURN_LEFT)
                     else:
@@ -809,16 +825,22 @@ class RouteNavigator(Node):
         g_score[start_node] = 0
         f_score = defaultdict(lambda: float("inf"))
         f_score[start_node] = self.manhattan(start_node, goal_node)
+        self.get_logger().info(
+            f"[start] Mannhattan for {start_node} and {goal_node} == {f_score[start_node]}"
+        )
 
         while open_set:
             curr_f, curr_node = heapq.heappop(open_set)
 
             if curr_node == goal_node:
                 path = self.reconstruct_path(came_from, curr_node)
-
                 return path
 
             for neighbour, weight in self.graph[curr_node].items():
+
+                self.get_logger().info(
+                    f"[{curr_node}]'s neighbour: {neighbour} with weight == {weight}"
+                )
 
                 tentative_g_score = g_score[curr_node] + weight
 
@@ -826,22 +848,33 @@ class RouteNavigator(Node):
                     came_from[neighbour] = curr_node
                     g_score[neighbour] = tentative_g_score
 
-                    f_score[neighbour] = tentative_g_score + self.manhattan(
-                        neighbour, goal_node
+                    manhattan = self.manhattan(neighbour, goal_node)
+
+                    f_score[neighbour] = tentative_g_score + manhattan
+
+                    self.get_logger().info(
+                        f"Mannhattan for {neighbour} and {goal_node} == {manhattan}"
                     )
 
-                    heapq.heappush(
-                        open_set,
-                        (f_score[neighbour], neighbour),
+                    self.get_logger().info(
+                        f"F score for {neighbour} and {goal_node} == {f_score[neighbour]}"
                     )
 
-        self.get_logger().error(f"No path found between {start_node} and {goal_node}.")
+                    if (f_score[neighbour], neighbour) not in open_set:
+                        heapq.heappush(
+                            open_set,
+                            (f_score[neighbour], neighbour),
+                        )
+                    else:
+                        self.get_logger().warn(f"{neighbour} already in open set.   ")
+
+        self.get_logger().info(f"No path found between {start_node} and {goal_node}.")
         return []
 
     def manhattan(self, node_a, node_b):
-        x1, y1 = gridbot.node_to_coords(node_a)
-        x2, y2 = gridbot.node_to_coords(node_b)
-        return abs(x1 - x2) + abs(y1 - y2)
+        xa, ya = gridbot.node_to_coords(node_a)
+        xb, yb = gridbot.node_to_coords(node_b)
+        return abs(xa - xb) + abs(ya - yb)
 
     def reconstruct_path(self, came_from, current):
         path = [current]

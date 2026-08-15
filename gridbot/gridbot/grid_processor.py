@@ -8,7 +8,6 @@ from rcl_interfaces.msg import (
 )
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Float64, Int8
-from typing import TypedDict
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 import gridbot.gridbot_helpers as gridbot
@@ -22,10 +21,6 @@ import colorsys
 
 import cv2
 from cv_bridge import CvBridge
-
-import faulthandler
-
-faulthandler.enable()
 
 bridge = CvBridge()
 
@@ -60,14 +55,14 @@ class GridProcessor(Node):
 
     img_w: int = 0
     img_h: int = 0
-    center_roi_mask: np.ndarray = None
-    left_roi_mask: np.ndarray = None
-    right_roi_mask: np.ndarray = None
-    aruco_roi_mask: np.ndarray = None
+    center_roi_mask = None
+    left_roi_mask  = None
+    right_roi_mask = None
+    aruco_roi_mask = None
 
     _is_tracking_marker: bool = False
-    _old_points: np.ndarray = None
-    _old_gray: np.ndarray = None
+    _old_points  = None
+    _old_gray = None
 
     last_found_aruco: int
     last_found_direction: gridbot.ArucoDirection
@@ -284,31 +279,30 @@ class GridProcessor(Node):
 
     def aruco_tracking(self, frame: np.array):
         """
+        Detects the largest ArUco tag and track its two sets of corners:
+            [0] - camera-relative upper left corner of an ArUco marker
+            [1] - camera-relative upper right corner of an ArUco marker
+            [2] - world-relative upper left corner of an ArUco marker
+            [3] - world-relative upper right corner of an ArUco marker
 
-        _old_points - four-element point array containing
-        [0] - camera-relative upper left corner of an ArUco marker
-        [1] - camera-relative upper right corner of an ArUco marker
-        [2] - world-relative upper left corner of an ArUco marker
-        [3] - world-relative upper right corner of an ArUco marker
+            e.g.
 
+            < - world-relative direction of the ArUco marker (north)
+                upper - EAST
+                [0]------------[1]
+                |              |
+                |              |
+            <   |              |
+                |              |
+                |              |
+                [2]------------[.]
 
-        e.g.
+            In that case, [0]--[1] make up the upper edge (highest edge of the marker on the camera (lowest Y))
+            and [2]--[0] make up the top edge (detector-decided corner 0 and 1 of the marker)
 
-        < - world-relative direction of the ArUco marker (north)
-               upper - EAST
-            [0]------------[1]
-             |              |
-             |              |
-         <   |              |
-             |              |
-             |              |
-            [2]------------[.]
+            As per explanation above, [0] and [3] end up being the same point.
 
-        In that case, [0]--[1] make up the upper edge (highest edge of the marker on the camera (lowest Y))
-        and [2]--[0] make up the top edge (detector-decided corner 0 and 1 of the marker)
-
-        As per explanation above, [0] and [3] end up being the same point.
-
+        Once the upper corners cross the boundary line at the bottom of the screen, the robot is considered to have "passed" the marker by standing on it.
         """
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -317,7 +311,6 @@ class GridProcessor(Node):
             src1=self.aruco_roi_mask, src2=gray, mask=self.aruco_roi_mask
         )
 
-        # ===========detecting===========
         if self._is_tracking_marker:
 
             new_points, st, _ = cv2.calcOpticalFlowPyrLK(
@@ -349,18 +342,18 @@ class GridProcessor(Node):
             upper_edge_good = upper_edge_new[upper_st == 1]
             top_edge_good = top_edge_new[top_st == 1]
 
-            direction = None
-            if self.last_found_direction is not None:
-                direction = self.last_found_direction
+            direction = self.last_found_direction
 
             if top_edge_good is None or len(top_edge_good) != 2 or any(top_st != 1):
 
                 self.get_logger().info(
                     f"Lost top edge for tag={self.last_found_aruco}."
                 )
-                self.get_logger().info(
-                    f"Direction obtained from last known:\n{self.last_found_direction.name.capitalize()}."
-                )
+
+                if direction is not None:
+                    self.get_logger().info(
+                        f"Direction obtained from last known:\n{self.last_found_direction.name.capitalize()}."
+                    )
             else:
                 direction = self._calculate_aruco_direction(
                     top_edge_good.reshape(-1, 2)
@@ -377,6 +370,7 @@ class GridProcessor(Node):
                 )
                 self._is_tracking_marker = False
                 return None, None, None
+
             # At least one point passed the line - publish, since we're likely on the point
             elif any(upper_st == 2):
                 self.get_logger().info(
@@ -630,11 +624,13 @@ class GridProcessor(Node):
 
         return frame
 
-    """
-    Sends signals regarding where lines appear/disappear (left, centre, right) side of the image, used to track the turning of the robot
-    """
 
     def turning_tracking(self, frame):
+        """
+        Sends signals regarding where lines appear/disappear (left, centre, right) side of the image, used to track the turning of the robot
+        """
+
+
         line_bitmask = self.get_mask_from_color(img=frame, color=self.line_color)
 
         rois = {
@@ -857,63 +853,7 @@ class GridProcessor(Node):
 
             return cv2.inRange(img_hsv, lower, upper)
 
-        # # src_h = src_hsv[:, :, 0]
-        # # src_h_new = src_h
-
-        # # # grayscale - use value
-        # # if color_r == color_g == color_B:
-        # #     lower = np.array([0, 0, max(0, color_v - threshold)])
-        # #     upper = np.array([255, 255, min(255, color_v + threshold)])
-        # # else:
-
-        # #     if threshold >= 89:
-        # #         lower = 0
-        # #         upper = 179
-        # #     # leftside OOB
-        # #     elif color_h - threshold < 0:
-        # #         diff = abs(threshold - color_h)
-        # #         lower = 0
-        # #         upper = color_h + diff
-        # #         src_h_new = cv2.add(src_h, diff)
-        # #     # rightside OOB
-        # #     elif color_h + threshold > 179:
-        # #         diff = abs(color_h + threshold - 179)
-        # #         lower = color_h - diff
-        # #         upper = 179
-        # #         src_h_new = cv2.add(src_h, diff)
-        # #     else:
-        # #         lower = color_h - threshold
-        # #         upper = color_h + threshold
-
-        # # src_hsv_new = cv2.merge([src_h_new, src_hsv[:, :, 1], src_hsv[:, :, 2]])
-
-        # lower_bound = np.array(
-        #     [self.h_thresh_low, self.s_low, self.v_low]
-        # )
-
-        # upper_bound = np.array(
-        #     [self.h_thresh_high, self.s_high, self.v_high]
-        # )
-
-        # # lower_bound = np.array(
-        # #     [
-        # #         lower,
-        # #         max(0, color_s - int(threshold * 255 / 100)),
-        # #         max(0, int(color_v * (1 - threshold / 100.0))),
-        # #     ]
-        # # )
-        # # upper_bound = np.array(
-        # #     [
-        # #         upper,
-        # #         min(255, color_s + int(threshold * 255 / 100)),
-        # #         min(255, int(color_v * (1 + threshold / 100.0))),
-        # #     ]
-        # # )
-
-        # mask = cv2.inRange(img_hsv, lower_bound, upper_bound)
-
-        # return mask
-
+        
     def _setup_parameters(self):
         self.declare_parameter(
             name="camera_topic",
@@ -1215,11 +1155,11 @@ class GridProcessor(Node):
 
         parameters = self.get_parameters(list(result.names))
 
-        self.get_logger().info("=" * 40)
+
         for parameter in parameters:
             self.get_logger().info(f"{parameter.name}: {parameter.value}")
 
-        self.get_logger().info("=" * 40)
+
 
 
 def main(args=None):
