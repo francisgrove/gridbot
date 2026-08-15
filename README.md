@@ -43,7 +43,7 @@ To use it with a YAML parameter file:
 ros2 run gridbot motor_driver  --ros-args --params-file /home/$USER/ros2_ws/src/gridbot/config/motor_driver_params.yaml -r __ns:=/gridbot
 ```
 
-(the namespace parameter `__ns` is set as I've had issues with running the yaml files, which require the structure at the top level to be: `/namespace/node:`)
+(the namespace parameter `__ns` is set as I've had issues with running the yaml files without it, as they require the structure at the top level to be: `/namespace/node:`)
 
 ## Generating a map
 
@@ -80,6 +80,8 @@ You can also run the package on a Alphabot2 with RPI via:
 ```bash
 ros2 launch gridbot robot_nodes.launch.py
 ```
+along with:
+* `motors:=` (either (`true` or `false`) to enable/disable the Motor Driver node.
 
 (note you need to have the `camera_ros` package, as said above).
 
