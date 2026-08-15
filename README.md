@@ -1,8 +1,9 @@
 a ROS2 package for Alphabot2 that allows it to navigate a user-defined route on a grid.
 
 ## Prerequisites:
-1. Make sure [ROS2 kilted is installed and you have built a workspace](https://docs.ros.org/en/kilted/Installation.html):
-2. Run rosdep for the `gridbot` package:
+1. Make sure to install [OpenCV at version `>= 4.7.0`](https://docs.opencv.org/4.13.0/d7/d9f/tutorial_linux_install.html). Otherwise, the `cv2.aruco` module won't work. 
+2. Make sure [ROS2 kilted is installed and you have built a workspace](https://docs.ros.org/en/kilted/Installation.html):
+3. Run rosdep for the `gridbot` package:
 ```bash
 rosdep install --from-paths src --ignore-src -r -y
 ```
