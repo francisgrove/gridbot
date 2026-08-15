@@ -91,6 +91,9 @@ Then, on your PC run:
 ```bash
 ros2 launch gridbot pc_nodes.launch.py
 ```
+### Using Foxglove
+
+If you're using Foxglove, you can import the panel template from `foxglove/gridbot_foxglove_template_.json`.
 
 ## Moving the robot
 
