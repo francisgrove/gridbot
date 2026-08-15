@@ -62,7 +62,7 @@ ros2 run gridbot  map_generator  --ros-args --params-file /home/$USER/ros2_ws/sr
 
 ## Launching the package
 
-1. Simulation
+**1. Simulation**
 
 You can launch the whole package in a Gazebo simulation via 
 ```bash
@@ -72,9 +72,10 @@ along with:
 * `gui:=` (either `true` or `false`) to enable/disable the Gazebo GUI 
 * `rosout_level:=` (either `info`, `debug`, `warn`, `error`) - sets the rosout level for all nodes used in the launch file
 * `foxglove:=` (either `true` or `false`) to enable/disable a Foxglove server.
+
 Please note that running this file will generate the map defined in `map_generator_params.yaml` automatically, and will not check for an existing output from it.
 
-2. Physical
+**2. Physical**
 
 You can also run the package on a Alphabot2 with RPI via:
 ```bash
@@ -91,7 +92,7 @@ Then, on your PC run:
 ```bash
 ros2 launch gridbot pc_nodes.launch.py
 ```
-### Using Foxglove
+## Using Foxglove
 
 If you're using Foxglove, you can import the panel template from `foxglove/gridbot_foxglove_template_.json`.
 
