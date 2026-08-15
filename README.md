@@ -99,6 +99,17 @@ If you're using Foxglove, you can import the panel template from `foxglove/gridb
 
 ## Moving the robot
 
+To make the robot move, send a message to the "`user_cmd`" topic (def: `gridbot/user_cmd`), e.g.:
+
+```bash
+ros2 topic pub /gridbot/user_cmd std_msgs/msg/String "{data: 'B2 C7'}"
+```
+
+(The foxglove template file features a premade panel for this)
+
+
+### How it works:
+
 (This section is written following the `route_navigator.py` node)
 
 The robot listens to directions sent to the `gridbot/user_cmd` topic that expects String type messages (e.g. "A3 B2 C1").
