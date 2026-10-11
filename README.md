@@ -1,8 +1,12 @@
 a ROS2 package for Alphabot2 that allows it to navigate a user-defined route on a grid.
 
+## Showcase in simulation:
+https://github.com/user-attachments/assets/b8d1c658-a19d-4822-b1c7-1ad58caf4daf
+
 ## Prerequisites:
-1. Make sure [ROS2 kilted is installed and you have built a workspace](https://docs.ros.org/en/kilted/Installation.html):
-2. Run rosdep for the `gridbot` package:
+1. Make sure to install [OpenCV at version `>= 4.7.0`](https://docs.opencv.org/4.13.0/d7/d9f/tutorial_linux_install.html). Otherwise, the `cv2.aruco` module won't work. 
+2. Make sure [ROS2 kilted is installed and you have built a workspace](https://docs.ros.org/en/kilted/Installation.html):
+3. Run rosdep for the `gridbot` package:
 ```bash
 rosdep install --from-paths src --ignore-src -r -y
 ```
@@ -13,7 +17,7 @@ Build the [camera_ros package (Pi)](https://github.com/christianrauch/camera_ros
 
 1. Clone this repository into your ros2 workspace's `src` folder: 
 ```bash
-git clone https://github.com/wurlmon/gridbot.git
+git clone https://github.com/francisgrove/gridbot.git .
 ```
 
 2. Build the `gridbot_interfaces` package first:
@@ -97,6 +101,17 @@ ros2 launch gridbot pc_nodes.launch.py
 If you're using Foxglove, you can import the panel template from `foxglove/gridbot_foxglove_template_.json`.
 
 ## Moving the robot
+
+To make the robot move, send a message to the "`user_cmd`" topic (def: `gridbot/user_cmd`), e.g.:
+
+```bash
+ros2 topic pub /gridbot/user_cmd std_msgs/msg/String "{data: 'B2 C7'}"
+```
+
+(The foxglove template file features a premade panel for this)
+
+
+### How it works:
 
 (This section is written following the `route_navigator.py` node)
 
