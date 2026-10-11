@@ -9,8 +9,20 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
-rosidl_generate_interfaces(${PROJECT_NAME}
+set(msg_files
   "msg/SimpleAruco.msg"
+  "msg/RouteNode.msg"
+)
+
+set(srv_files
+  "srv/GenerateMap.srv"
+  "srv/GenerateRoute.srv"
+  "srv/GetDims.srv"
+)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  ${msg_files}
+  ${srv_files}
 )
 
 if(BUILD_TESTING)

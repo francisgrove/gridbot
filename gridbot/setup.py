@@ -15,7 +15,7 @@ def package_files(directory):
 
 
 models = []
-for file in package_files("sim_assets"):
+for file in package_files("assets"):
     dest = os.path.join("share", package_name, os.path.dirname(file))
     models.append((dest, [file]))
 
@@ -40,8 +40,8 @@ setup(
             glob(os.path.join("config", "*")),
         ),
         (
-            os.path.join("share", package_name, "sim_assets/worlds"),
-            glob(os.path.join("sim_assets/worlds", "*")),
+            os.path.join("share", package_name, "assets/worlds"),
+            glob(os.path.join("assets/worlds", "*")),
         ),
     ]
     + models,
@@ -61,7 +61,8 @@ setup(
             "grid_processor = gridbot.grid_processor:main",
             "route_navigator = gridbot.route_navigator:main",
             "motor_driver = gridbot.motor_driver:main",
-            "map_generator = gridbot.map_generator:main",
+            "map_generator = gridbot.service_map_generator:main",
+            "route_generator = gridbot.service_route_generator:main",
         ],
     },
 )

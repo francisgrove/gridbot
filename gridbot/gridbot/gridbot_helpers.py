@@ -24,7 +24,7 @@ class RobotDirection(Enum):
 
 class LineObservation(IntFlag):
     """
-    Possible appearences of the line during turning of the robot.
+    Possible appearances of the line during turning of the robot.
     """
 
     NONE = 0
@@ -87,3 +87,20 @@ def coords_to_node(coords: tuple) -> str:
     row = str(coords[1] + 1)
 
     return f"{col}{row}"
+
+
+class RouteNode:
+    """
+    Describes a singular node in the robot's route.
+    """
+
+    def __init__(self, name, priority, directions):
+        self.name = name
+        self.priority = priority
+        self.directions = directions
+
+    def __str__(self):
+        return f"{self.name}: ({[dir.name for dir in self.directions]})"
+
+    def __repr__(self):
+        return f"{self.name}: ({[dir.name for dir in self.directions]})"

@@ -1,0 +1,4 @@
+string[] user_nodes
+int32 looking_dir
+---
+gridbot_interfaces/RouteNode[] route

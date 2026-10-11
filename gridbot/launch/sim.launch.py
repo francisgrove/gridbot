@@ -20,13 +20,13 @@ def generate_launch_description():
     pkg_share = get_package_share_directory(pkg_name)
 
     robot_xacro = os.path.join(pkg_share, "description", "robot.urdf.xacro")
-    robot_description = xacro.process_file(robot_xacro).toxml() # type: ignore
+    robot_description = xacro.process_file(robot_xacro).toxml()  # type: ignore
 
-    world_path = os.path.join(pkg_share, "sim_assets/worlds", "world.sdf")
+    world_path = os.path.join(pkg_share, "assets/worlds", "world.sdf")
 
     set_gz_model_path = SetEnvironmentVariable(
         name="GZ_SIM_RESOURCE_PATH",
-        value=os.path.join(pkg_share, "sim_assets/models"),
+        value=os.path.join(pkg_share, "assets/models"),
     )
 
     gui_arg = DeclareLaunchArgument(
@@ -141,6 +141,12 @@ def generate_launch_description():
         "grid_processor_params.yaml",
     )
 
+    route_generator_config = os.path.join(
+        pkg_share,
+        "config",
+        "route_generator_params.yaml",
+    )
+
     route_navigator_config = os.path.join(
         pkg_share,
         "config",
@@ -182,8 +188,6 @@ def generate_launch_description():
         ],
     )
 
-   
-
     grid_processor = Node(
         package="gridbot",
         executable="grid_processor",
@@ -195,6 +199,20 @@ def generate_launch_description():
             "--ros-args",
             "--log-level",
             [f"{pkg_name}.grid_processor:=", rosout_level],
+        ],
+    )
+
+    route_generator = Node(
+        package="gridbot",
+        executable="route_generator",
+        name="route_generator",
+        namespace=pkg_name,
+        output="screen",
+        parameters=[route_generator_config],
+        arguments=[
+            "--ros-args",
+            "--log-level",
+            [f"{pkg_name}.route_generator:=", rosout_level],
         ],
     )
 
@@ -212,6 +230,29 @@ def generate_launch_description():
         ],
     )
 
+    twist_mux_config = os.path.join(
+        pkg_share,
+        "config",
+        "twist_mux_params.yaml",
+    )
+
+    twist_mux = Node(
+        package="twist_mux",
+        executable="twist_mux",
+        name="twist_mux",
+        namespace=pkg_name,
+        output="screen",
+        parameters=[twist_mux_config],
+        arguments=[
+            "--ros-args",
+            "--log-level",
+            [f"{pkg_name}.twist_mux:=", rosout_level],
+        ],
+        remappings=[
+            ('cmd_vel_out', )
+        ]
+    )
+
     foxglove_pkg_share = get_package_share_directory("foxglove_bridge")
     foxglove_launch_path = os.path.join(
         foxglove_pkg_share,
@@ -221,11 +262,13 @@ def generate_launch_description():
 
     foxglove_launch = IncludeLaunchDescription(
         XMLLaunchDescriptionSource(foxglove_launch_path),
-        condition=IfCondition(LaunchConfiguration("foxglove"))
+        condition=IfCondition(LaunchConfiguration("foxglove")),
     )
 
     return LaunchDescription(
         [
+            map_generator,
+            route_generator,
             gui_arg,
             rosout_level_arg,
             foxglove_arg,
@@ -237,9 +280,9 @@ def generate_launch_description():
             joint_state_pub,
             ros_gz_bridge,
             spawn_robot,
-            map_generator,
             grid_processor,
             route_navigator,
+            twist_mux,
             foxglove_launch,
         ]
     )

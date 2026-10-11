@@ -1,5 +1,6 @@
 import rclpy
 from rclpy.node import Node
+from rclpy.lifecycle import LifecycleNode
 from geometry_msgs.msg import Twist
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
@@ -14,7 +15,7 @@ from rclpy.parameter_event_handler import ParameterEventHandler
 from gpiozero import Motor
 
 
-class MotorDriver(Node):
+class MotorDriver(LifecycleNode):
 
     twist_topic: str
 

@@ -1,7 +1,8 @@
-/gridbot/map_generator:
+/**:
   ros__parameters:
-    yaml_save_path: "ros2_ws/src/gridbot/config/map_graph.yaml"
-    img_save_path: "ros2_ws/src/gridbot/sim_assets/models/grid/map_grid.png"
+    yaml_save_path: "ros2_ws/src/gridbot/config"
+    map_img_save_path: "ros2_ws/src/gridbot/assets/models/grid"
+    markers_imgs_save_path: "ros2_ws/src/gridbot/assets/print"
     img_width: 4096
     img_height: 4096
     tag_size: 30

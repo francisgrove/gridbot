@@ -1,0 +1,6 @@
+/**:
+  ros__parameters:
+    pulse_min: 500
+    pulse_max: 2500
+    hz: 50
+    addr: 40

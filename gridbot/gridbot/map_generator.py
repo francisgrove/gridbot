@@ -2,8 +2,6 @@ import rclpy
 from rcl_interfaces.msg import ParameterDescriptor, IntegerRange, ListParametersResult
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from ament_index_python.packages import get_package_share_directory
-import os
 import yaml
 import gridbot.gridbot_helpers as gridbot
 
@@ -328,7 +326,7 @@ class MapGenerator(Node):
         line_color = self.get_parameter("line_color").value
         if len(line_color) != 3:
             self.get_logger().fatal(
-                f"Paramater 'line_color' = {line_color} must have 3 elements."
+                f"Parameter 'line_color' = {line_color} must have 3 elements."
             )
             for c in line_color:
                 c = min(0, max(255, c))

@@ -1,4 +1,4 @@
-/gridbot/motor_driver:
+/**:
   ros__parameters:
     twist_topic: "cmd_vel"
 

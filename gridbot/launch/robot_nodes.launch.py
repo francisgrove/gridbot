@@ -3,8 +3,6 @@ import os
 from launch import LaunchDescription
 
 from launch.actions import (
-    IncludeLaunchDescription,
-    SetEnvironmentVariable,
     DeclareLaunchArgument,
 )
 from ament_index_python.packages import get_package_share_directory
@@ -38,6 +36,21 @@ def generate_launch_description():
             ("image_raw", "image_raw"),
             ("camera_info", "camera_info"),
         ],
+    )
+
+    twist_mux_config = os.path.join(
+        pkg_share,
+        "config",
+        "twist_mux_params.yaml",
+    )
+
+    twist_mux = Node(
+        package="twist_mux",
+        executable="twist_mux",
+        name="twist_mux",
+        namespace=pkg_name,
+        output="screen",
+        parameters=[twist_mux_config],
     )
 
     composable_nodes = [
@@ -87,6 +100,22 @@ def generate_launch_description():
         output="screen",
         parameters=[motor_driver_config],
         condition=IfCondition(LaunchConfiguration("motors")),
+        remappings=[("cmd_vel", "cmd_vel_out")],  # for twist_mux
+    )
+
+    camera_centerer_config = os.path.join(
+        pkg_share,
+        "config",
+        "camera_centerer_params.yaml",
+    )
+
+    camera_centerer = Node(
+        package="gridbot",
+        executable="camera_centerer",
+        node_name="camera_centerer",
+        namespace=pkg_name,
+        output="screen",
+        parameters=[camera_centerer_config],
     )
 
     return LaunchDescription(
@@ -95,5 +124,6 @@ def generate_launch_description():
             camera_node,
             container,
             motor_driver,
+            camera_centerer
         ]
     )
