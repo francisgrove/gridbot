@@ -112,7 +112,7 @@ def generate_launch_description():
     camera_controller = Node(
         package="gridbot",
         executable="camera_controller",
-        node_name="camera_controller",
+        name="camera_controller",
         namespace=pkg_name,
         output="screen",
         parameters=[camera_controller_config],

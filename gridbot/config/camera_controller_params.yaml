@@ -2,5 +2,7 @@
   ros__parameters:
     pulse_min: 500
     pulse_max: 2500
-    addr: 40
+    addr: 64
     button_pin: 7
+    default_pan_angle: 90
+    default_tilt_angle: 135
