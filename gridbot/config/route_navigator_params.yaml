@@ -14,10 +14,10 @@
     start_pos: "A1"
     start_dir: "north"
 
-    pause_time: 1.0
+    pause_duration: 1.0
     lost_timeout: 5.0
 
-    frequency: 0.005
+    timer_period: 0.005
     k_p: 1.0
     k_i: 0.01
     k_d: 0.01

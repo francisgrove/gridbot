@@ -1,11 +1,7 @@
+from functools import partial
+
 import rclpy
 from rclpy.node import Node
-from rcl_interfaces.msg import (
-    ParameterDescriptor,
-    FloatingPointRange,
-    IntegerRange,
-    ListParametersResult,
-)
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Float64, Int8
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
@@ -67,7 +63,7 @@ class GridProcessor(Node):
     last_found_aruco: int
     last_found_direction: gridbot.ArucoDirection
 
-    clahe: cv2.CLAHE
+    _clahe: cv2.CLAHE
 
     h_thresh_low: int = 0
     s_low: int = 0
@@ -77,7 +73,7 @@ class GridProcessor(Node):
     s_high: int = 0
     v_high: int = 0
 
-    handler: ParameterEventHandler
+    _handler: ParameterEventHandler
 
     def __init__(self, node_name: str):
         super().__init__(node_name)
@@ -111,7 +107,7 @@ class GridProcessor(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
-
+        
         self.camera_sub = self.create_subscription(
             CompressedImage, self.camera_topic, self.image_callback, qos_profile=qos
         )
@@ -132,9 +128,9 @@ class GridProcessor(Node):
             CompressedImage, "camera/line_mask", qos_profile=qos
         )
 
-        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
-        self.handler = ParameterEventHandler(self)
+        self._handler = ParameterEventHandler(self)
 
         for parameter_name in (
             "h_thresh_low",
@@ -145,18 +141,11 @@ class GridProcessor(Node):
             "v_high",
             "line_color",
         ):
-            self.handler.add_parameter_callback(
+            self._handler.add_parameter_callback(
                 parameter_name=parameter_name,
                 node_name=node_name,
                 callback=self.hsv_parameter_callback,
             )
-
-    def hsv_parameter_callback(self, p: rclpy.parameter.Parameter) -> None:
-        value = rclpy.parameter.parameter_value_to_python(p.value)
-
-        self.get_logger().info(f"Received an update to parameter: {p.name}: {value}")
-
-        setattr(self, p.name, value)
 
     def image_callback(self, msg: CompressedImage):
         frame_raw = bridge.compressed_imgmsg_to_cv2(
@@ -166,7 +155,7 @@ class GridProcessor(Node):
         img_hsv = cv2.cvtColor(frame_raw, cv2.COLOR_BGR2HSV)
         
         h, s, v = cv2.split(img_hsv)
-        v = self.clahe.apply(v)
+        v = self._clahe.apply(v)
         img_hsv = cv2.merge([h, s, v])
 
         equalized = cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR)
@@ -185,99 +174,21 @@ class GridProcessor(Node):
             self._prepare_rois()
 
         upper_edge, top_edge, direction = None, None, None
-        upper_edge, top_edge, direction = self.aruco_tracking(frame)
+        upper_edge, top_edge, direction = self._aruco_tracking(frame)
 
-        centerline, target_node = self.line_tracking(frame)
-        self.turning_tracking(frame)
+        centerline, target_node = self._line_tracking(frame)
+        self._turning_tracking(frame)
 
         if self.prepare_tracked_image:
-            tracked_image = self.prepare_image_with_trackers(
+            tracked_image = self._prepare_image_with_trackers(
                 frame, upper_edge, top_edge, direction, centerline, target_node, 1.5
             )
 
             tracked_image_msg = bridge.cv2_to_compressed_imgmsg(cvim=tracked_image)
             self.tracked_image_pub.publish(tracked_image_msg)
 
-    def _quantize_image(self, img: np.ndarray, divider: int):
 
-        frame = img // divider * divider + divider // 2
-
-        return frame
-
-    def _prepare_rois(self):
-        """
-        Prepares ROIs for left, center and right "line tracking areas".
-        Prepares a ROI for ArUco tag searching.
-        """
-
-        self.get_logger().info("Setting up ROI masks.")
-        roi_base = np.zeros((self.img_h, self.img_w), dtype=np.uint8)
-
-        height_px = int(self.img_h * self.line_roi_height)
-        sides_width_px = int(self.img_w * self.sides_line_roi_width)
-        center_width_px = int(self.img_w * self.center_line_roi_width)
-
-        (
-            self.left_roi_mask,
-            self.center_roi_mask,
-            self.right_roi_mask,
-            self.aruco_roi_mask,
-        ) = [roi_base.copy() for _ in range(4)]
-
-        self.left_roi_mask[
-            self.img_h - height_px : self.img_h,
-            :sides_width_px,
-        ] = 255
-
-        self.right_roi_mask[
-            self.img_h - height_px : self.img_h,
-            self.img_w - sides_width_px : self.img_w,
-        ] = 255
-
-        self.center_roi_mask[
-            self.img_h - height_px : self.img_h,
-            self.img_w // 2
-            - center_width_px // 2 : self.img_w // 2
-            + center_width_px // 2,
-        ] = 255
-
-        aruco_height_px = int(self.img_h * self.aruco_roi_height)
-        aruco_width_px = int(self.img_w * self.aruco_roi_width)
-
-        self.aruco_roi_mask[
-            self.img_h - aruco_height_px : self.img_h,
-            self.img_w // 2
-            - aruco_width_px // 2 : self.img_w // 2
-            + aruco_width_px // 2,
-        ] = 255
-
-        return
-
-    def _calculate_aruco_direction(self, points):
-        """
-        Calculates relative direction of the ArUco marker based on two top points (world-relative)s.
-        """
-
-        tl = points[0]
-        tr = points[1]
-
-        dx = tr[0] - tl[0]
-        dy = tr[1] - tl[1]
-
-        angle_d = (np.degrees(np.arctan2(dy, dx))) % 360
-
-        threshold = 45
-
-        if 360 - threshold <= angle_d or 0 <= angle_d < threshold:
-            return gridbot.ArucoDirection.NORTH
-        elif threshold <= angle_d < 90 + threshold:
-            return gridbot.ArucoDirection.WEST
-        elif 90 + threshold <= angle_d < 180 + threshold:
-            return gridbot.ArucoDirection.SOUTH
-        else:  # 180 + threshold <= angle_d < 360-threshold
-            return gridbot.ArucoDirection.EAST
-
-    def aruco_tracking(self, frame: np.array):
+    def _aruco_tracking(self, frame: np.array):
         """
         Detects the largest ArUco tag and track its two sets of corners:
             [0] - camera-relative upper left corner of an ArUco marker
@@ -290,11 +201,11 @@ class GridProcessor(Node):
             < - world-relative direction of the ArUco marker (north)
                 upper - EAST
                 [0]------------[1]
-                |              |
-                |              |
-            <   |              |
-                |              |
-                |              |
+                |               |
+                |               |
+            <   |               |
+                |               |
+                |               |
                 [2]------------[.]
 
             In that case, [0]--[1] make up the upper edge (highest edge of the marker on the camera (lowest Y))
@@ -317,7 +228,7 @@ class GridProcessor(Node):
                 self._old_gray, gray_crop, self._old_points, None, **self.lk_params
             )
 
-            # Immediatelly ignore a tracked point if it is below the bottom line
+            # Immediately ignore a tracked point if it is below the bottom line
             bottom_line = self.img_h - self.aruco_padding
 
             if new_points is None or all(st == 0):
@@ -427,11 +338,7 @@ class GridProcessor(Node):
             self._is_tracking_marker = True
             return None, None, None
 
-    def _make_window(self, name: str, src: np.array):
-        cv2.namedWindow(winname=name, flags=cv2.WINDOW_FREERATIO)
-        cv2.imshow(winname=name, mat=src)
-
-    def line_tracking(self, frame_raw: np.array):
+    def _line_tracking(self, frame_raw: np.array):
         """
         1. Masks out the frame by the line_color. Converts each bit island to a contour.
         2. Picks the contour by these criteria:
@@ -445,13 +352,13 @@ class GridProcessor(Node):
 
         camera_center = (self.img_w // 2, self.img_h // 2)
 
-        line_bitmask = self.get_mask_from_color(img=frame, color=self.line_color)
+        line_bitmask = self._get_mask_from_color(img=frame, color=self.line_color)
 
         line_bitmask_crop = cv2.bitwise_and(
             src1=line_bitmask, src2=line_bitmask, mask=self.center_roi_mask
         )
 
-        line_contours = self.get_contours(line_bitmask_crop)
+        line_contours = self._get_contours(line_bitmask_crop)
 
         if len(line_contours) == 0:
             return None, None
@@ -471,7 +378,7 @@ class GridProcessor(Node):
         if centerline is None or len(centerline) == 0:
             return None, None
 
-        # NOTE: by default, pick the node selected via self.followed_node_offset.
+        # by default, pick the node selected via self.followed_node_offset.
         # However, in case we don't have enough nodes, pick the furthest one.
         # While normally picking the furthest one could lead to turning too quickly,
         # in case of very few nodes (as node offset shouldn't be too high) it's fine.
@@ -488,7 +395,71 @@ class GridProcessor(Node):
 
         return centerline, target_node
 
-    def prepare_image_with_trackers(
+    def _turning_tracking(self, frame):
+        """
+        Sends signals regarding where lines appear/disappear (left, centre, right) side of the image, used to track the turning of the robot
+        """
+
+
+        line_bitmask = self._get_mask_from_color(img=frame, color=self.line_color)
+
+        rois = {
+            gridbot.LineObservation.LEFT: self.left_roi_mask,
+            gridbot.LineObservation.CENTER: self.center_roi_mask,
+            gridbot.LineObservation.RIGHT: self.right_roi_mask,
+        }
+
+        shares: dict[gridbot.LineObservation, int] = {}
+
+        for region, roi_mask in rois.items():
+            crop = cv2.bitwise_and(line_bitmask, line_bitmask, mask=roi_mask)
+
+            col_has_line = np.count_nonzero(crop, axis=0) > 0
+            row_has_line = np.count_nonzero(crop, axis=1) > 0
+
+            width = np.count_nonzero(col_has_line)
+            height = np.count_nonzero(row_has_line)
+
+            # Ignore shapes that are wider than they are higher (lines going sideways)
+            if width > height:
+                shares[region] = 0
+                continue
+
+            roi_cols = np.where(np.count_nonzero(roi_mask, axis=0) > 0)[0]
+            if roi_cols.size == 0:
+                shares[region] = 0
+                continue
+            roi_left, roi_right = roi_cols[0], roi_cols[-1]
+
+            line_cols = np.where(col_has_line)[0]
+            if line_cols.size == 0:
+                shares[region] = 0
+                continue
+            line_left, line_right = line_cols[0], line_cols[-1]
+
+            # Only count shares which mask is WITHIN the roi (and not outside, or touching the borders) - this prevents premature readings
+            if line_left <= roi_left or line_right >= roi_right:
+                shares[region] = 0
+                continue
+
+            shares[region] = cv2.countNonZero(crop)
+
+        all_line_pixels = sum(shares.values())
+
+        flags = gridbot.LineObservation.NONE
+
+        if all_line_pixels > 0:
+            for region, share in shares.items():
+                if share / all_line_pixels >= self.line_turning_threshold:
+                    flags |= region
+
+        int_msg = Int8()
+        int_msg.data = flags
+
+        self.line_turning_pub.publish(int_msg)
+
+
+    def _prepare_image_with_trackers(
         self,
         frame,
         upper_edge,
@@ -625,68 +596,84 @@ class GridProcessor(Node):
         return frame
 
 
-    def turning_tracking(self, frame):
+    def _quantize_image(self, img: np.ndarray, divider: int):
+
+        frame = img // divider * divider + divider // 2
+
+        return frame
+
+    def _prepare_rois(self):
         """
-        Sends signals regarding where lines appear/disappear (left, centre, right) side of the image, used to track the turning of the robot
+        Prepares ROIs for left, center and right "line tracking areas".
+        Prepares a ROI for ArUco tag searching.
         """
 
+        self.get_logger().info("Setting up ROI masks.")
+        roi_base = np.zeros((self.img_h, self.img_w), dtype=np.uint8)
 
-        line_bitmask = self.get_mask_from_color(img=frame, color=self.line_color)
+        height_px = int(self.img_h * self.line_roi_height)
+        sides_width_px = int(self.img_w * self.sides_line_roi_width)
+        center_width_px = int(self.img_w * self.center_line_roi_width)
 
-        rois = {
-            gridbot.LineObservation.LEFT: self.left_roi_mask,
-            gridbot.LineObservation.CENTER: self.center_roi_mask,
-            gridbot.LineObservation.RIGHT: self.right_roi_mask,
-        }
+        (
+            self.left_roi_mask,
+            self.center_roi_mask,
+            self.right_roi_mask,
+            self.aruco_roi_mask,
+        ) = [roi_base.copy() for _ in range(4)]
 
-        shares: dict[gridbot.LineObservation, int] = {}
+        self.left_roi_mask[
+            self.img_h - height_px : self.img_h,
+            :sides_width_px,
+        ] = 255
 
-        for region, roi_mask in rois.items():
-            crop = cv2.bitwise_and(line_bitmask, line_bitmask, mask=roi_mask)
+        self.right_roi_mask[
+            self.img_h - height_px : self.img_h,
+            self.img_w - sides_width_px : self.img_w,
+        ] = 255
 
-            col_has_line = np.count_nonzero(crop, axis=0) > 0
-            row_has_line = np.count_nonzero(crop, axis=1) > 0
+        self.center_roi_mask[
+            self.img_h - height_px : self.img_h,
+            self.img_w // 2
+            - center_width_px // 2 : self.img_w // 2
+            + center_width_px // 2,
+        ] = 255
 
-            width = np.count_nonzero(col_has_line)
-            height = np.count_nonzero(row_has_line)
+        aruco_height_px = int(self.img_h * self.aruco_roi_height)
+        aruco_width_px = int(self.img_w * self.aruco_roi_width)
 
-            # Ignore shapes that are wider than they are higher (lines going sideways)
-            if width > height:
-                shares[region] = 0
-                continue
+        self.aruco_roi_mask[
+            self.img_h - aruco_height_px : self.img_h,
+            self.img_w // 2
+            - aruco_width_px // 2 : self.img_w // 2
+            + aruco_width_px // 2,
+        ] = 255
 
-            roi_cols = np.where(np.count_nonzero(roi_mask, axis=0) > 0)[0]
-            if roi_cols.size == 0:
-                shares[region] = 0
-                continue
-            roi_left, roi_right = roi_cols[0], roi_cols[-1]
+        return
 
-            line_cols = np.where(col_has_line)[0]
-            if line_cols.size == 0:
-                shares[region] = 0
-                continue
-            line_left, line_right = line_cols[0], line_cols[-1]
+    def _calculate_aruco_direction(self, points):
+        """
+        Calculates relative direction of the ArUco marker based on two top points (world-relative)s.
+        """
 
-            # Only count shares which mask is WITHIN the roi (and not outside, or touching the borders) - this prevents premature readings
-            if line_left <= roi_left or line_right >= roi_right:
-                shares[region] = 0
-                continue
+        tl = points[0]
+        tr = points[1]
 
-            shares[region] = cv2.countNonZero(crop)
+        dx = tr[0] - tl[0]
+        dy = tr[1] - tl[1]
 
-        all_line_pixels = sum(shares.values())
+        angle_d = (np.degrees(np.arctan2(dy, dx))) % 360
 
-        flags = gridbot.LineObservation.NONE
+        threshold = 45
 
-        if all_line_pixels > 0:
-            for region, share in shares.items():
-                if share / all_line_pixels >= self.line_turning_threshold:
-                    flags |= region
-
-        int_msg = Int8()
-        int_msg.data = flags
-
-        self.line_turning_pub.publish(int_msg)
+        if 360 - threshold <= angle_d or 0 <= angle_d < threshold:
+            return gridbot.ArucoDirection.NORTH
+        elif threshold <= angle_d < 90 + threshold:
+            return gridbot.ArucoDirection.WEST
+        elif 90 + threshold <= angle_d < 180 + threshold:
+            return gridbot.ArucoDirection.SOUTH
+        else:  # 180 + threshold <= angle_d < 360-threshold
+            return gridbot.ArucoDirection.EAST
 
     def _get_centerline(self, src):
         centerline = []
@@ -761,16 +748,16 @@ class GridProcessor(Node):
 
         return (cx, cy)
 
-    def get_contours(self, src):
+    def _get_contours(self, src):
         ret, thresh = cv2.threshold(src, 127, 255, 0)
 
-        contours, hierarchy = cv2.findContours(
+        contours, _ = cv2.findContours(
             thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
         )
 
         return contours
 
-    def get_mask_from_color(self, img, color):
+    def _get_mask_from_color(self, img, color):
         img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
         # color is RGB
@@ -853,276 +840,25 @@ class GridProcessor(Node):
 
             return cv2.inRange(img_hsv, lower, upper)
 
-        
+    def hsv_parameter_callback(self, p: rclpy.parameter.Parameter) -> None:
+        value = rclpy.parameter.parameter_value_to_python(p.value)
+
+        self.get_logger().info(f"Received an update to parameter: {p.name}: {value}")
+
+        setattr(self, p.name, value)
+      
     def _setup_parameters(self):
-        self.declare_parameter(
-            name="camera_topic",
-            value="camera/image_raw/compressed",
-            descriptor=ParameterDescriptor(
-                description="Topic used to receive camera images (compressed).",
-            ),
-        )
+        p = partial(gridbot.declare_param, self)
 
-        self.declare_parameter(
-            name="line_offset_topic",
-            value="line_offset",
-            descriptor=ParameterDescriptor(
-                description="Topic used to send line_offset.",
-            ),
-        )
+        # Topics
+        self.camera_topic = p("camera_topic", "camera/image_raw/compressed", "Topic used to receive camera images (compressed).")
+        self.line_offset_topic = p("line_offset_topic", "line_offset", "Topic used to send line_offset.")
+        self.tracked_image_topic = p("tracked_image_topic", "tracked_image", "Topic used to send images with additional visuals.")
+        self.prepare_tracked_image = p("prepare_tracked_image", False, "Whether to build and publish the tracked image visualization.")
+        self.aruco_topic = p("aruco_topic", "aruco", "Topic used to send aruco ID + direction.")
+        self.line_turning_topic = p("line_turning_topic", "line_turning", "Topic used to send information about turning and line visibility.")
 
-        self.declare_parameter(
-            name="tracked_image_topic",
-            value="tracked_image",
-            descriptor=ParameterDescriptor(
-                description="Topic used to send images with additional visuals.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="prepare_tracked_image",
-            value=False,
-            descriptor=ParameterDescriptor(
-                description="Whether to build and publish the tracked image visualization.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="aruco_topic",
-            value="aruco",
-            descriptor=ParameterDescriptor(
-                description="Topic used to send aruco ID + direction.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="line_turning_topic",
-            value="line_turning",
-            descriptor=ParameterDescriptor(
-                description="Topic used to send information about turning and line visibility.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="line_color",
-            value=[0, 0, 0],
-            descriptor=ParameterDescriptor(
-                description="RGB Color of the line to target.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="line_roi_height",
-            value=0.5,
-            descriptor=ParameterDescriptor(
-                description="Height of the line search ROI - [0..1] factor.",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0.0,
-                        to_value=1.0,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="center_line_roi_width",
-            value=0.4,
-            descriptor=ParameterDescriptor(
-                description="Width of the central line search ROI - [0..1] factor.",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0.0,
-                        to_value=1.0,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="sides_line_roi_width",
-            value=0.3,
-            descriptor=ParameterDescriptor(
-                description="Width of the side line search ROIs - [0..1] factor.",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0.0,
-                        to_value=1.0,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="aruco_roi_width",
-            value=0.5,
-            descriptor=ParameterDescriptor(
-                description="Width of the ArUco search ROI - [0..1] factor.",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0.0,
-                        to_value=1.0,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="aruco_roi_height",
-            value=0.5,
-            descriptor=ParameterDescriptor(
-                description="Height of the ArUco search ROI - [0..1] factor.",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0.0,
-                        to_value=1.0,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="aruco_padding",
-            value=5,
-            descriptor=ParameterDescriptor(
-                description='Offset from the bottom of the frame where the node will count a found ArUco code as "Passed by".',
-            ),
-        )
-
-        self.declare_parameter(
-            name="line_turning_threshold",
-            value=0.2,
-            descriptor=ParameterDescriptor(
-                description="0..1 factor of all of grid line's pixels in a specific ROI to be counted as having a line in it.",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0.0,
-                        to_value=1.0,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="midline_step",
-            value=10,
-            descriptor=ParameterDescriptor(
-                description="Pixel rows skipped when looking for centerline nodes.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=1,
-                        to_value=2**31 - 1,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="followed_node_offset",
-            value=4,
-            descriptor=ParameterDescriptor(
-                description="Which node from the bottom will be targeted.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=0,
-                        to_value=2**31 - 1,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="h_thresh_low",
-            value=0,
-            descriptor=ParameterDescriptor(
-                description="Lower bound of the hue threshold for line detection.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=0,
-                        to_value=179,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="h_thresh_high",
-            value=0,
-            descriptor=ParameterDescriptor(
-                description="Upper bound of the hue threshold for line detection.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=0,
-                        to_value=179,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="s_low",
-            value=0,
-            descriptor=ParameterDescriptor(
-                description="Lower bound of the saturation threshold for line detection.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=0,
-                        to_value=255,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="s_high",
-            value=0,
-            descriptor=ParameterDescriptor(
-                description="Upper bound of the saturation threshold for line detection.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=0,
-                        to_value=255,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="v_low",
-            value=0,
-            descriptor=ParameterDescriptor(
-                description="Lower bound of the saturation threshold for line detection.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=0,
-                        to_value=255,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="v_high",
-            value=0,
-            descriptor=ParameterDescriptor(
-                description="Upper bound of the saturation threshold for line detection.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=0,
-                        to_value=255,
-                    )
-                ],
-            ),
-        )
-
-        self.camera_topic = self.get_parameter("camera_topic").value
-        self.line_offset_topic = self.get_parameter("line_offset_topic").value
-        self.tracked_image_topic = self.get_parameter("tracked_image_topic").value
-        self.prepare_tracked_image = self.get_parameter("prepare_tracked_image").value
-        self.aruco_topic = self.get_parameter("aruco_topic").value
-        self.line_turning_topic = self.get_parameter("line_turning_topic").value
-
-        line_color = self.get_parameter("line_color").value
+        line_color = p("line_color", [0, 0, 0], "RGB Color of the line to target.")
         if isinstance(line_color, (list, tuple)):
             self.line_color = [
                 int(np.clip(c, 0, 255)) for c in (list(line_color) + [0, 0, 0])[:3]
@@ -1130,36 +866,28 @@ class GridProcessor(Node):
         else:
             self.line_color = [255, 0, 0]
 
-        self.line_roi_height = self.get_parameter("line_roi_height").value
-        self.center_line_roi_width = self.get_parameter("center_line_roi_width").value
-        self.sides_line_roi_width = self.get_parameter("sides_line_roi_width").value
+        # ROIs
+        self.line_roi_height = p("line_roi_height", 0.5, "Height of the line search ROI - [0..1] factor.", min_value=0.0, max_value=1.0)
+        self.center_line_roi_width = p("center_line_roi_width", 0.4, "Width of the central line search ROI - [0..1] factor.", min_value=0.0, max_value=1.0)
+        self.sides_line_roi_width = p("sides_line_roi_width", 0.3, "Width of the side line search ROIs - [0..1] factor.", min_value=0.0, max_value=1.0)
+        self.aruco_roi_width = p("aruco_roi_width", 0.5, "Width of the ArUco search ROI - [0..1] factor.", min_value=0.0, max_value=1.0)
+        self.aruco_roi_height = p("aruco_roi_height", 0.5, "Height of the ArUco search ROI - [0..1] factor.", min_value=0.0, max_value=1.0)
+        self.aruco_padding = p("aruco_padding", 5, 'Offset from the bottom of the frame where the node will count a found ArUco code as "Passed by".')
 
-        self.aruco_roi_width = self.get_parameter("aruco_roi_width").value
-        self.aruco_roi_height = self.get_parameter("aruco_roi_height").value
-        self.aruco_padding = self.get_parameter("aruco_padding").value
+        # Line tracking
+        self.line_turning_threshold = p("line_turning_threshold", 0.2, "0..1 factor of all of grid line's pixels in a specific ROI to be counted as having a line in it.", min_value=0.0, max_value=1.0)
+        self.midline_step = p("midline_step", 10, "Pixel rows skipped when looking for centerline nodes.", min_value=1, max_value=2**31 - 1)
+        self.followed_node_offset = p("followed_node_offset", 4, "Which node from the bottom will be targeted.", min_value=0, max_value=2**31 - 1)
 
-        self.line_turning_threshold = self.get_parameter("line_turning_threshold").value
+        # HSV thresholds
+        self.h_thresh_low = p("h_thresh_low", 0, "Lower bound of the hue threshold for line detection.", min_value=0, max_value=179)
+        self.h_thresh_high = p("h_thresh_high", 0, "Upper bound of the hue threshold for line detection.", min_value=0, max_value=179)
+        self.s_low = p("s_low", 0, "Lower bound of the saturation threshold for line detection.", min_value=0, max_value=255)
+        self.s_high = p("s_high", 0, "Upper bound of the saturation threshold for line detection.", min_value=0, max_value=255)
+        self.v_low = p("v_low", 0, "Lower bound of the value threshold for line detection.", min_value=0, max_value=255)
+        self.v_high = p("v_high", 0, "Upper bound of the value threshold for line detection.", min_value=0, max_value=255)
 
-        self.midline_step = self.get_parameter("midline_step").value
-        self.followed_node_offset = self.get_parameter("followed_node_offset").value
-
-        self.h_thresh_low = self.get_parameter("h_thresh_low").value
-        self.s_low = self.get_parameter("s_low").value
-        self.v_low = self.get_parameter("v_low").value
-
-        self.h_thresh_high = self.get_parameter("h_thresh_high").value
-        self.s_high = self.get_parameter("s_high").value
-        self.v_high = self.get_parameter("v_high").value
-
-        result: ListParametersResult = self.list_parameters([], depth=0)
-
-        parameters = self.get_parameters(list(result.names))
-
-
-        for parameter in parameters:
-            self.get_logger().info(f"{parameter.name}: {parameter.value}")
-
-
+        gridbot.log_params(self)
 
 
 def main(args=None):
