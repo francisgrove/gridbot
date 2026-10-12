@@ -18,7 +18,7 @@ set(srv_files
   "srv/GenerateMap.srv"
   "srv/GenerateRoute.srv"
   "srv/GetDims.srv"
-  "srv/CenterCamera.srv"
+  "srv/AngleCamera.srv"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}

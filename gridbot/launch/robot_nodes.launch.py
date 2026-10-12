@@ -103,19 +103,19 @@ def generate_launch_description():
         remappings=[("cmd_vel", "cmd_vel_out")],  # for twist_mux
     )
 
-    camera_centerer_config = os.path.join(
+    camera_controller_config = os.path.join(
         pkg_share,
         "config",
-        "camera_centerer_params.yaml",
+        "camera_controller_params.yaml",
     )
 
-    camera_centerer = Node(
+    camera_controller = Node(
         package="gridbot",
-        executable="camera_centerer",
-        node_name="camera_centerer",
+        executable="camera_controller",
+        node_name="camera_controller",
         namespace=pkg_name,
         output="screen",
-        parameters=[camera_centerer_config],
+        parameters=[camera_controller_config],
     )
 
     return LaunchDescription(
@@ -124,6 +124,6 @@ def generate_launch_description():
             camera_node,
             container,
             motor_driver,
-            camera_centerer
+            camera_controller
         ]
     )
