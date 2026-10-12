@@ -2,9 +2,6 @@ import math
 
 import rclpy
 from rclpy.node import Node
-from rcl_interfaces.msg import (
-    ParameterDescriptor,
-)
 
 import yaml
 from itertools import groupby
@@ -25,15 +22,12 @@ class RouteGenerator(Node):
     def __init__(self, node_name):
         super().__init__(node_name)
 
-        self.declare_parameter(
-            name="graph_filepath",
-            value="",
-            descriptor=ParameterDescriptor(
-                description="Filepath of the map graph yaml file. It contains the adjacency map as well as the map's dimensions.",
-            ),
+        graph_path = gridbot.declare_param(
+            self,
+            "graph_filepath",
+            "",
+            "Filepath of the map graph yaml file. It contains the adjacency map as well as the map's dimensions.",
         )
-
-        graph_path = self.get_parameter("graph_filepath").value
 
         with open(graph_path) as f:
             try:
@@ -47,20 +41,12 @@ class RouteGenerator(Node):
 
                 self.graph = load["graph"]
 
-                self.declare_parameter(
-                    name="graph_height",
-                    value=load["graph_height"],
-                    descriptor=ParameterDescriptor(description="Height of the graph."),
+                self.graph_height = gridbot.declare_param(
+                    self, "graph_height", load["graph_height"], "Height of the graph."
                 )
-
-                self.declare_parameter(
-                    name="graph_width",
-                    value=load["graph_width"],
-                    descriptor=ParameterDescriptor(description="Width of the graph."),
+                self.graph_width = gridbot.declare_param(
+                    self, "graph_width", load["graph_width"], "Width of the graph."
                 )
-
-                self.graph_width = self.get_parameter("graph_width").value
-                self.graph_height = self.get_parameter("graph_height").value
 
             except yaml.YAMLError as e:
                 self.get_logger().error(str(e))

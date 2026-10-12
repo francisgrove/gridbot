@@ -1,5 +1,6 @@
+from functools import partial
+
 import rclpy
-from rcl_interfaces.msg import ParameterDescriptor, IntegerRange, ListParametersResult
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 import yaml
@@ -111,219 +112,19 @@ class MapGenerator(Node):
                 )
 
     def _setup_parameters(self):
-        self.declare_parameter(
-            name="yaml_save_path",
-            value="config/",
-            descriptor=ParameterDescriptor(
-                description="Save path of the map yaml file. Relative to the package."
-            ),
-        )
+        p = partial(gridbot.declare_param, self)
 
-        self.declare_parameter(
-            name="img_save_path",
-            value="assets/",
-            descriptor=ParameterDescriptor(
-                description="Save path of the generated map image."
-            ),
-        )
+        # Save paths
+        self.yaml_save_path = p("yaml_save_path", "config/", "Save path of the map yaml file. Relative to the package.")
+        self.img_save_path = p("img_save_path", "assets/", "Save path of the generated map image.")
 
-        self.declare_parameter(
-            name="img_width",
-            value=2048,
-            descriptor=ParameterDescriptor(
-                description="Width of generated image in pixels.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=1,
-                        to_value=8192,
-                        step=1,
-                    )
-                ],
-            ),
-        )
+        # Image parameters
+        self.img_width = p("img_width", 2048, "Width of generated image in pixels.", min_value=1, max_value=8192)
+        self.img_height = p("img_height", 2048, "Height of generated image in pixels.", min_value=1, max_value=8192)
+        self.tag_size = p("tag_size", 30, "Size of the ArUco tag in pixels.", min_value=1, max_value=2048)
+        self.text_size = p("text_size", 25, "Size of edge weight text in pixels.", min_value=0, max_value=2048)
 
-        self.declare_parameter(
-            name="img_height",
-            value=2048,
-            descriptor=ParameterDescriptor(
-                description="Height of generated image in pixels.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=1,
-                        to_value=8192,
-                        step=1,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="tag_size",
-            value=30,
-            descriptor=ParameterDescriptor(
-                description="Size of the ArUco tag in pixels.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=1,
-                        to_value=2048,
-                        step=1,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="text_size",
-            value=25,
-            descriptor=ParameterDescriptor(
-                description="Size of edge weight text in pixels.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=0,
-                        to_value=2048,
-                        step=1,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="line_color",
-            value=[255, 0, 0],
-            descriptor=ParameterDescriptor(description="RGB color of graph lines."),
-        )
-
-        self.declare_parameter(
-            name="line_length",
-            value=100,
-            descriptor=ParameterDescriptor(
-                description="Length of lines between nodes in pixels.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=1,
-                        to_value=4096,
-                        step=1,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="padding",
-            value=8,
-            descriptor=ParameterDescriptor(
-                description="Padding of a tag from the image border in pixels.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=0,
-                        to_value=2048,
-                        step=1,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="text_padding",
-            value=8,
-            descriptor=ParameterDescriptor(
-                description="Padding of weight text from its line in pixels.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=0,
-                        to_value=2048,
-                        step=1,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="line_thickness",
-            value=8,
-            descriptor=ParameterDescriptor(
-                description="Thickness of graph lines in pixels.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=1,
-                        to_value=100,
-                        step=1,
-                    )
-                ],
-            ),
-        )
-
-        # Graph parameters
-
-        self.declare_parameter(
-            name="graph_width",
-            value=6,
-            descriptor=ParameterDescriptor(
-                description="Number of columns in the graph.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=1,
-                        to_value=26,
-                        step=1,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="graph_height",
-            value=5,
-            descriptor=ParameterDescriptor(
-                description="Number of rows in the graph.",
-                integer_range=[
-                    IntegerRange(
-                        from_value=1,
-                        to_value=26,
-                        step=1,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            "removed_nodes",
-            Parameter.Type.STRING_ARRAY,
-            ParameterDescriptor(description="List of disabled nodes in the graph."),
-        )
-
-        self.declare_parameter(
-            "edges",
-            Parameter.Type.STRING_ARRAY,
-            ParameterDescriptor(
-                description=(
-                    "Graph edges formatted as FROM,TO,WEIGHT. " "Example: A1,B1,7"
-                ),
-            ),
-        )
-
-        self.declare_parameter(
-            "use_weights",
-            False,
-            ParameterDescriptor(
-                description=(
-                    "Whether to use weights provided in edges, or to calculate them from node positions."
-                )
-            )
-        )
-
-        self.yaml_save_path = self.get_parameter("yaml_save_path").value
-        self.img_save_path = self.get_parameter("img_save_path").value
-        self.tag_size = self.get_parameter("tag_size").value
-        self.text_size = self.get_parameter("text_size").value
-        self.line_color = self.get_parameter("line_color").value
-
-        self.img_height = self.get_parameter("img_height").value
-        self.img_width = self.get_parameter("img_width").value
-
-        self.graph_width = self.get_parameter("graph_width").value
-        self.graph_height = self.get_parameter("graph_height").value
-
-        line_color = self.get_parameter("line_color").value
+        line_color = p("line_color", [255, 0, 0], "RGB color of graph lines.")
         if len(line_color) != 3:
             self.get_logger().fatal(
                 f"Parameter 'line_color' = {line_color} must have 3 elements."
@@ -333,23 +134,19 @@ class MapGenerator(Node):
 
         self.line_color = line_color
 
-        self.line_length = self.get_parameter("line_length").value
-        self.line_thickness = self.get_parameter("line_thickness").value
+        self.line_length = p("line_length", 100, "Length of lines between nodes in pixels.", min_value=1, max_value=4096)
+        self.padding = p("padding", 8, "Padding of a tag from the image border in pixels.", min_value=0, max_value=2048)
+        self.text_padding = p("text_padding", 8, "Padding of weight text from its line in pixels.", min_value=0, max_value=2048)
+        self.line_thickness = p("line_thickness", 8, "Thickness of graph lines in pixels.", min_value=1, max_value=100)
 
-        self.padding = self.get_parameter("padding").value
-        self.text_padding = self.get_parameter("text_padding").value
+        # Graph parameters
+        self.graph_width = p("graph_width", 6, "Number of columns in the graph.", min_value=1, max_value=26)
+        self.graph_height = p("graph_height", 5, "Number of rows in the graph.", min_value=1, max_value=26)
+        self.removed_nodes = p("removed_nodes", Parameter.Type.STRING_ARRAY, "List of disabled nodes in the graph.")
+        self.edges = p("edges", Parameter.Type.STRING_ARRAY, "Graph edges formatted as FROM,TO,WEIGHT. Example: A1,B1,7")
+        self.use_weights = p("use_weights", False, "Whether to use weights provided in edges, or to calculate them from node positions.")
 
-        self.removed_nodes = self.get_parameter("removed_nodes").value
-        self.edges = self.get_parameter("edges").value
-
-        self.use_weights = self.get_parameter("use_weights").value
-
-        result: ListParametersResult = self.list_parameters([], depth=0)
-
-        parameters = self.get_parameters(list(result.names))
-
-        for parameter in parameters:
-            self.get_logger().info(f"{parameter.name}: {parameter.value}")
+        gridbot.log_params(self)
 
     def _add_nodes(self):
         for y in range(self.graph_height):

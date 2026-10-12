@@ -1,13 +1,16 @@
+from functools import partial
+
 import rclpy
 from rclpy.node import Node
 import time
-from rcl_interfaces.msg import ParameterDescriptor, IntegerRange, ListParametersResult
 import threading
 
 from gridbot_interfaces.srv import AngleCamera
 from gpiozero import Button
 
 from adafruit_servokit import ServoKit
+
+import gridbot.gridbot_helpers as gridbot
 
 
 class PanTiltController:
@@ -69,7 +72,7 @@ class CameraController(Node):
         super().__init__(node_name=node_name)
 
         self._setup_parameters()
-        
+
         self.service = self.create_service(
             AngleCamera, node_name + "/set_angles", self.center_camera_callback
         )
@@ -93,44 +96,12 @@ class CameraController(Node):
         return response
 
     def _setup_parameters(self):
+        p = partial(gridbot.declare_param, self)
 
-        self.declare_parameter(
-            name="pulse_min",
-            value=500,
-            descriptor=ParameterDescriptor(
-                description="Minimum pulse PWM for the WS-S90 servos."
-            ),
-        )
-        self.declare_parameter(
-            name="pulse_max",
-            value=2500,
-            descriptor=ParameterDescriptor(
-                description="Maximum pulse PWM for the WS-S90 servos."
-            ),
-        )
-
-        self.declare_parameter(
-            name="addr",
-            value=64,
-            descriptor=ParameterDescriptor(
-                description="I2C address of the PCA 9685 motor driver, in decimal (default 0x40 = 64)."
-            ),
-        )
-
-        self.declare_parameter(
-            "button_pin",
-            value=7,
-            descriptor=ParameterDescriptor(
-                description="GPIO pin of the button used for centering."
-            ),
-        )
-
-        self.pulse_min = self.get_parameter("pulse_min").value
-        self.pulse_max = self.get_parameter("pulse_max").value
-
-        self.addr = self.get_parameter("addr").value
-
-        return
+        self.pulse_min = p("pulse_min", 500, "Minimum pulse PWM for the WS-S90 servos.")
+        self.pulse_max = p("pulse_max", 2500, "Maximum pulse PWM for the WS-S90 servos.")
+        self.addr = p("addr", 64, "I2C address of the PCA 9685 motor driver, in decimal (default 0x40 = 64).")
+        self.button_pin = p("button_pin", 7, "GPIO pin of the button used for centering.")
 
     def destroy_node(self):
         self.controller.close()

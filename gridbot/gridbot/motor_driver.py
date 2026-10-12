@@ -1,18 +1,17 @@
+from functools import partial
+
 import rclpy
 from rclpy.node import Node
 from rclpy.lifecycle import LifecycleNode
 from geometry_msgs.msg import Twist
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
-from rcl_interfaces.msg import (
-    ParameterDescriptor,
-    ListParametersResult,
-    FloatingPointRange,
-)
 import rclpy.parameter
 from rclpy.parameter_event_handler import ParameterEventHandler
 
 from gpiozero import Motor
+
+import gridbot.gridbot_helpers as gridbot
 
 
 class MotorDriver(LifecycleNode):
@@ -136,124 +135,28 @@ class MotorDriver(LifecycleNode):
         self.right_wheel.value = right_val
 
     def _setup_parameters(self):
-        self.declare_parameter(
-            "twist_topic",
-            "cmd_vel",
-            descriptor=ParameterDescriptor(
-                descritpion="Name of the subscriber topic frmo which the node will take the Twist messages."
-            ),
-        )
+        p = partial(gridbot.declare_param, self)
 
-        self.declare_parameter(
-            "left_enable_pin",
-            6,
-            descriptor=ParameterDescriptor(
-                descritpion="Integer value representing the pin used for enabling the left wheel."
-            ),
-        )
+        self.twist_topic = p("twist_topic", "cmd_vel", "Name of the subscriber topic from which the node will take the Twist messages.")
 
-        self.declare_parameter(
-            "right_enable_pin",
-            26,
-            descriptor=ParameterDescriptor(
-                descritpion="Integer value representing the pin used for enabling the right wheel."
-            ),
-        )
+        # Pins
+        self.left_enable_pin = p("left_enable_pin", 6, "Integer value representing the pin used for enabling the left wheel.")
+        self.right_enable_pin = p("right_enable_pin", 26, "Integer value representing the pin used for enabling the right wheel.")
+        self.left_forward_pin = p("left_forward_pin", 12, "Integer value representing the pin used for controlling the forward motion of the left wheel.")
+        self.left_backward_pin = p("left_backward_pin", 13, "Integer value representing the pin used for controlling the backward motion of the left wheel.")
+        self.right_forward_pin = p("right_forward_pin", 20, "Integer value representing the pin used for controlling the forward motion of the right wheel.")
+        self.right_backward_pin = p("right_backward_pin", 21, "Integer value representing the pin used for controlling the backward motion of the right wheel.")
 
-        self.declare_parameter(
-            "left_forward_pin",
-            12,
-            descriptor=ParameterDescriptor(
-                descritpion="Integer value representing the pin used for controlling the forward motion of the left wheel."
-            ),
-        )
+        # Geometry
+        self.wheel_radius = p("wheel_radius", 0.021, "Radius of the wheels in meters.")
+        self.wheel_separation = p("wheel_separation", 0.08382, "Distance between the centres of the two wheels in meters.")
 
-        self.declare_parameter(
-            "left_backward_pin",
-            13,
-            descriptor=ParameterDescriptor(
-                descritpion="Integer value representing the pin used for controlling the backward motion of the left wheel."
-            ),
-        )
+        # Output
+        self.vel_multiplier = p("vel_multiplier", 1.0, "Multiplier of the robot's velocity. 1.0 means full speed, 0.0 means nothing.", min_value=0.0, max_value=1.0)
+        self.frequency = p("frequency", 50.0, "Frequency of the PWM pins.")
+        self.invert_direction = p("invert_direction", False, "Whether to invert the direction of robot's movements.")
 
-        self.declare_parameter(
-            "right_forward_pin",
-            20,
-            descriptor=ParameterDescriptor(
-                descritpion="Integer value representing the pin used for controlling the forward motion of the right wheel."
-            ),
-        )
-
-        self.declare_parameter(
-            "right_backward_pin",
-            21,
-            descriptor=ParameterDescriptor(
-                descritpion="Integer value representing the pin used for controlling the backward motion of the right wheel."
-            ),
-        )
-
-        self.declare_parameter(
-            "wheel_radius",
-            0.021,
-            descriptor=ParameterDescriptor(
-                description="Radius of the wheels in meters."
-            ),
-        )
-
-        self.declare_parameter(
-            "wheel_separation",
-            0.08382,
-            descriptor=ParameterDescriptor(
-                description="Distance between the centres of the two wheels in meters."
-            ),
-        )
-
-        self.declare_parameter(
-            "vel_multiplier",
-            1.0,
-            descriptor=ParameterDescriptor(
-                description="Multiplier of the robot's velocity. 1.0 means full speed, 0.0 means nothing.",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0,
-                        to_value=1.0,
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            "frequency",
-            50.0,
-            descriptor=ParameterDescriptor(description="Frequency of the PWM pins."),
-        )
-
-        self.declare_parameter(
-            "invert_direction",
-            False,
-            descriptor=ParameterDescriptor(
-                description="Whether to invert the direction of robot's movements."
-            ),
-        )
-
-        self.twist_topic = self.get_parameter("twist_topic").value
-        self.left_enable_pin = self.get_parameter("left_enable_pin").value
-        self.left_forward_pin = self.get_parameter("left_forward_pin").value
-        self.left_backward_pin = self.get_parameter("left_backward_pin").value
-        self.right_enable_pin = self.get_parameter("right_enable_pin").value
-        self.right_forward_pin = self.get_parameter("right_forward_pin").value
-        self.right_backward_pin = self.get_parameter("right_backward_pin").value
-        self.wheel_radius = self.get_parameter("wheel_radius").value
-        self.wheel_separation = self.get_parameter("wheel_separation").value
-        self.vel_multiplier = self.get_parameter("vel_multiplier").value
-        self.frequency = self.get_parameter("frequency").value
-        self.invert_direction = self.get_parameter("invert_direction").value
-
-        result: ListParametersResult = self.list_parameters([], depth=0)
-        parameters = self.get_parameters(list(result.names))
-
-        for param in parameters:
-            self.get_logger().info(f"{param.name}: {param.value}")
+        gridbot.log_params(self)
 
 
 def main(args=None):

@@ -1,14 +1,8 @@
-from builtins import list
+from functools import partial
 
 import rclpy
 from rclpy.node import Node
-from rcl_interfaces.msg import (
-    ParameterDescriptor,
-    FloatingPointRange,
-    ListParametersResult,
-)
-import rclpy.parameter
-from rclpy.timer import Timer
+
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from std_msgs.msg import Float64, Int8, String
 from geometry_msgs.msg import Twist
@@ -16,6 +10,30 @@ from geometry_msgs.msg import Twist
 import gridbot.gridbot_helpers as gridbot
 from gridbot_interfaces.srv import GenerateRoute, GetDims
 from gridbot_interfaces.msg import RouteNode, SimpleAruco
+
+
+class PID:
+
+    def __init__(self, k_p: float, k_i: float, k_d: float):
+        self.k_p = k_p
+        self.k_i = k_i
+        self.k_d = k_d
+
+        self.integral = 0.0
+        self.prev_error = None
+        self.prev_t = None
+
+    def update(self, error, t):
+        out = self.k_p * error
+
+        if self.prev_t is not None and t > self.prev_t:
+            dt = t - self.prev_t
+            self.integral += error * dt
+            out += self.k_i * self.integ_error + self.k_d * (error - self.prev_error)
+
+        self.prev_error = error
+        self.prev_t = t
+        return out
 
 
 class RouteNavigator(Node):
@@ -30,16 +48,7 @@ class RouteNavigator(Node):
     curr_pos: str
     curr_dir: gridbot.ArucoDirection
 
-    robot_route: list[RouteNode] = []
-
-    curr_error = 0.0
-    integ_error = 0.0
-    prev_error = 0.0
-
-    k_p = 0.0
-    k_i = 0.0
-    k_d = 0.0
-    pid_output = 0.0
+    robot_route: list[RouteNode]
 
     linear_vel: float
     angular_vel: float
@@ -47,8 +56,7 @@ class RouteNavigator(Node):
     linear_vel_multiplier: float
     angular_vel_multiplier: float
 
-    prev_time = 0
-    pause_time = 0
+    pause_start = 0
 
     graph_width: int = None
     graph_height: int = None
@@ -58,32 +66,24 @@ class RouteNavigator(Node):
     center_found: bool
     clear_route: bool
 
-    # timer: Timer
-    # handler: ParameterEventHandler
-
     def __init__(self, node_name: str):
         super().__init__(node_name)
 
-        self.prev_time = 0
+        self.setup_parameters()
 
-        self.prev_error = 0.0
-        self.curr_error = 0.0
-        self.integ_error = 0.0
+        self.robot_route = []
 
         self.pid_output = 0.0
 
         self.curr_state = gridbot.RobotState.IDLE
 
         self.last_line_observation = None
-
         self.clear_route = False
         self.node_reached = False
         self.center_found = False
 
         self._dims_pending = False
         self._dims_timer = self.create_timer(1.0, self.request_dims)
-
-        self.setup_parameters()
 
         qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -124,29 +124,16 @@ class RouteNavigator(Node):
         )
 
         self.timer = self.create_timer(
-            timer_period_sec=(self.frequency), callback=self.timer_callback
+            timer_period_sec=self.timer_period, callback=self.timer_callback
         )
 
         self.route_client = self.create_client(GenerateRoute, self.route_service)
-
-        self.dims_client = self.create_client(GenerateRoute, self.dims_service)
-
-        # self.handler = ParameterEventHandler(self)
-        # for parameter_name in (
-        #     "k_p",
-        #     "k_i",
-        #     "k_d",
-        #     "linear_vel_multiplier",
-        #     "angular_vel_multiplier",
-        # ):
-        #     self.handler.add_parameter_callback(
-        #         parameter_name=parameter_name,
-        #         node_name=node_name,
-        #         callback=self.parameter_callback,
-        #     )
+        self.dims_client = self.create_client(GetDims, self.dims_service)
 
         self.context.on_shutdown(self.cleanup)
 
+
+# =================== DIMS SERVICE ===================
     def request_dims(self):
         if self.graph_width is not None or self.graph_height is not None:
             return
@@ -158,7 +145,7 @@ class RouteNavigator(Node):
         self._dims_pending = True
         future = self.dims_client.call_async(GetDims.Request())
         future.add_done_callback(self.on_dims_response)
-
+ 
     def on_dims_response(self, future):
         self._dims_pending = False
         try:
@@ -174,6 +161,7 @@ class RouteNavigator(Node):
             f"Map dimensions are: {self.graph_width} x {self.graph_height}"
         )
 
+# =================== ROUTE SERVICE ===================
     def request_route(self, nodes: list[str], looking_dir: gridbot.ArucoDirection):
 
         if not self.route_client.service_is_ready():
@@ -197,13 +185,7 @@ class RouteNavigator(Node):
             self.get_logger().error(f"GenerateRoute service call failed: {e}")
             return
 
-    def parameter_callback(self, p: rclpy.parameter.Parameter) -> None:
-        value = rclpy.parameter.parameter_value_to_python(p.value)
-
-        self.get_logger().info(f"Received an update to parameter: {p.name}: {value}")
-
-        setattr(self, p.name, value)
-
+# =================== CALLBACKS ===================
     def user_cmd_callback(self, msg: String):
 
         self.get_logger().info(f"Received user command:\n{msg.data}")
@@ -218,30 +200,10 @@ class RouteNavigator(Node):
         self.request_route(nodes=nodes_from_msg, looking_dir=self.curr_dir)
 
     def line_offset_callback(self, msg: Float64) -> None:
-        error = float(msg.data)
+        err = float(msg.data())
+        t = self.get_clock.now().nanoseconds
 
-        now = self.get_clock().now().nanoseconds
-
-        if self.prev_time == 0:
-            self.prev_time = now
-            self.prev_error = error
-            return
-
-        duration = now - self.prev_time
-        dt = duration * 1e-9
-
-        self.integ_error += error * dt
-        deriv_error = (error - self.prev_error) / dt
-
-        pid_output = (
-            self.k_p * error + self.k_i * self.integ_error + self.k_d * deriv_error
-        )
-
-        if pid_output != self.pid_output:
-            self.pid_output = pid_output
-
-        self.prev_error = error
-        self.prev_time = now
+        self.pid_output = self.pid.update(error=err, t=t)
 
     def aruco_callback(self, msg: SimpleAruco):
         if self.curr_state != gridbot.RobotState.MOVING:
@@ -315,13 +277,15 @@ class RouteNavigator(Node):
 
         self.last_line_observation = flags
 
+# =================== PUBLISHER CALLBACK ===================
+
     def timer_callback(self):
         twist_msg = Twist()
 
         if not self.robot_route:
             return
 
-        new_state = None
+        next_state = None
         next_node = None
         next_dir = None
 
@@ -340,16 +304,16 @@ class RouteNavigator(Node):
 
             match next_dir:
                 case gridbot.RobotDirection.MOVE:
-                    new_state = gridbot.RobotState.MOVING
+                    next_state = gridbot.RobotState.MOVING
                 case (
                     gridbot.RobotDirection.TURN_LEFT | gridbot.RobotDirection.TURN_RIGHT
                 ):
-                    new_state = gridbot.RobotState.TURNING
+                    next_state = gridbot.RobotState.TURNING
                 case _:
                     self.get_logger().error(f"Direction {next_dir} not supported.")
 
-        if new_state is not None and self.curr_state != new_state:
-            self.curr_state = new_state
+        if next_state is not None and self.curr_state != next_state:
+            self.curr_state = next_state
             self.get_logger().info(
                 f"Robot state set to: {self.curr_state.name.capitalize()}"
             )
@@ -369,7 +333,7 @@ class RouteNavigator(Node):
 
                     self.node_reached = False
                     self.curr_state = gridbot.RobotState.PAUSED
-                    self.pause_time = self.get_clock().now().nanoseconds
+                    self.pause_start = self.get_clock().now().nanoseconds
             case gridbot.RobotState.TURNING:
                 twist_msg.linear.x = 0.0
 
@@ -387,14 +351,14 @@ class RouteNavigator(Node):
                     self.get_logger().info(f"Line centered")
                     self.center_found = False
                     self.curr_state = gridbot.RobotState.PAUSED
-                    self.pause_time = self.get_clock().now().nanoseconds
+                    self.pause_start = self.get_clock().now().nanoseconds
 
             case gridbot.RobotState.PAUSED:
                 twist_msg.linear.x = 0.0
                 twist_msg.angular.z = 0.0
 
-                time_passed = self.get_clock().now().nanoseconds - self.pause_time
-                if time_passed > self.pause_time * 1e9:
+                time_passed = self.get_clock().now().nanoseconds - self.pause_start
+                if time_passed > self.pause_start * 1e9:
                     self.get_logger().info(f"Unpaused after {time_passed/1e9} seconds.")
 
                     if self.clear_route:
@@ -425,229 +389,44 @@ class RouteNavigator(Node):
 
         self.twist_pub.publish(twist_msg)
 
+# =================== PARAM SETUP ===================
     def setup_parameters(self):
-        self.declare_parameter(
-            name="line_offset_topic",
-            value="line_offset",
-            descriptor=ParameterDescriptor(
-                description="Topic used to receive line_offset information.",
-            ),
-        )
+        p = partial(gridbot.declare_param, self)
 
-        self.declare_parameter(
-            name="aruco_topic",
-            value="aruco",
-            descriptor=ParameterDescriptor(
-                description="Topic used to receive aruco tag information (ID + relative direction of the robot to the tag's top).",
-            ),
-        )
+        # Topics / services
+        self.line_offset_topic = p("line_offset_topic", "line_offset", "Topic used to receive line_offset information.")
+        self.aruco_topic = p("aruco_topic", "aruco", "Topic used to receive aruco tag information (ID + relative direction of the robot to the tag's top).")
+        self.line_turning_topic = p("line_turning_topic", "line_turning", "Topic used to receive information about line visibility in each third of the camera.")
+        self.user_cmd_topic = p("user_cmd_topic", "user_cmd", "Topic used to receive route nodes from the user.")
+        self.twist_topic = p("twist_topic", "cmd_vel", "Topic used to send twist messages.")
+        self.route_service = p("route_service", "generate_route", "Service used to generate robot's grid route.")
+        self.dims_service = p("dims_service", "get_dims", "Service used to obtain robot's grid dimensions.")
 
-        self.declare_parameter(
-            name="line_turning_topic",
-            value="line_turning",
-            descriptor=ParameterDescriptor(
-                description="Topic used to receive information about line visibility in each third of the camera.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="user_cmd_topic",
-            value="user_cmd",
-            descriptor=ParameterDescriptor(
-                description="Topic used to receive route nodes from the user.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="twist_topic",
-            value="cmd_vel",
-            descriptor=ParameterDescriptor(
-                description="Topic used to send twist messages.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="route_service",
-            value="generate_route",
-            descriptor=ParameterDescriptor(
-                description="Service used to generate robot's grid route.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="dims_service",
-            value="get_dims",
-            descriptor=ParameterDescriptor(
-                description="Service used to obtain robot's grid dimensions.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="start_pos",
-            value="A1",
-            descriptor=ParameterDescriptor(
-                description="Default starting position of the robot."
-            ),
-        )
-
-        self.declare_parameter(
-            name="start_dir",
-            value="north",
-            descriptor=ParameterDescriptor(
-                description="Default starting rotation of the robot."
-            ),
-        )
-
-        self.declare_parameter(
-            name="frequency",
-            value=0.005,
-            descriptor=ParameterDescriptor(
-                description="Frequency the timer controlling the robot's state machine will be running at.",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0,
-                        to_value=float("inf"),
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="pause_time",
-            value=1.0,
-            descriptor=ParameterDescriptor(
-                description="Time (in seconds) to pause the robot for after reaching a node/turning correctly.",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0,
-                        to_value=float("inf"),
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="lost_timeout",
-            value=5.0,
-            descriptor=ParameterDescriptor(
-                description="Time (in seconds) after the robot will be considered lost (counting starts when line turning retrieves [0 0 0].",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0,
-                        to_value=float("inf"),
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="k_p",
-            value=1.0,
-            descriptor=ParameterDescriptor(
-                description="Factor for the proportional part of the PID controller.",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0,
-                        to_value=float("inf"),
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="k_i",
-            value=0.0,
-            descriptor=ParameterDescriptor(
-                description="Factor for the integral part of the PID controller.",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0,
-                        to_value=float("inf"),
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="k_d",
-            value=0.0,
-            descriptor=ParameterDescriptor(
-                description="Factor for the derivative part of the PID controller.",
-                floating_point_range=[
-                    FloatingPointRange(
-                        from_value=0,
-                        to_value=float("inf"),
-                    )
-                ],
-            ),
-        )
-
-        self.declare_parameter(
-            name="linear_vel",
-            value=0.5,
-            descriptor=ParameterDescriptor(
-                description="Linear velocity value of the robot, in m/s.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="angular_vel",
-            value=10.0,
-            descriptor=ParameterDescriptor(
-                description="Linear velocity value of the robot, in m/s.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="linear_vel_multiplier",
-            value=1.0,
-            descriptor=ParameterDescriptor(
-                description="Linear velocity multiplier. Used to fine-control the actual values being sent.",
-            ),
-        )
-
-        self.declare_parameter(
-            name="angular_vel_multiplier",
-            value=1.0,
-            descriptor=ParameterDescriptor(
-                description="Angular velocity multiplier. Used to fine-control the actual values being sent.",
-            ),
-        )
-
-        self.line_offset_topic = self.get_parameter("line_offset_topic").value
-        self.line_turning_topic = self.get_parameter("line_turning_topic").value
-        self.aruco_topic = self.get_parameter("aruco_topic").value
-        self.user_cmd_topic = self.get_parameter("user_cmd_topic").value
-        self.twist_topic = self.get_parameter("twist_topic").value
-
-        self.route_service = self.get_parameter("route_service").value
-        self.dims_service = self.get_parameter("dims_service").value
-
-        self.curr_pos = self.get_parameter("start_pos").value
-
+        # Start state
+        self.curr_pos = p("start_pos", "A1", "Default starting position of the robot.")
         self.curr_dir = gridbot.ArucoDirection[
-            str(self.get_parameter("start_dir").value).upper()
+            str(p("start_dir", "north", "Default starting rotation of the robot.")).upper()
         ]
 
-        self.pause_time = self.get_parameter("pause_time").value
-        self.lost_timeout = self.get_parameter("lost_timeout").value
+        # Timing
+        self.timer_period = p("timer_period", 0.005, "Timer period of the robot's state machine.", min_value=0.0)
+        self.pause_duration = p("pause_duration", 1.0, "Duration (in seconds) to pause the robot for after reaching a node/turning correctly.", min_value=0.0)
+        self.lost_timeout = p("lost_timeout", 5.0, "Time (in seconds) after the robot will be considered lost (counting starts when line turning retrieves [0 0 0].", min_value=0.0)
 
-        self.frequency = self.get_parameter("frequency").value
-        self.k_p = self.get_parameter("k_p").value
-        self.k_i = self.get_parameter("k_i").value
-        self.k_d = self.get_parameter("k_d").value
+        # PID
+        self.pid = PID(
+            p("k_p", 1.0, "Factor for the proportional part of the PID controller.", min_value=0.0),
+            p("k_i", 0.0, "Factor for the integral part of the PID controller.", min_value=0.0),
+            p("k_d", 0.0, "Factor for the derivative part of the PID controller.", min_value=0.0),
+        )
 
-        self.linear_vel = self.get_parameter("linear_vel").value
-        self.angular_vel = self.get_parameter("angular_vel").value
+        # Velocities
+        self.linear_vel = p("linear_vel", 0.5, "Linear velocity value of the robot, in m/s.")
+        self.angular_vel = p("angular_vel", 10.0, "Angular velocity value of the robot, in rad/s.")
+        self.linear_vel_multiplier = p("linear_vel_multiplier", 1.0, "Linear velocity multiplier. Used to fine-control the actual values being sent.")
+        self.angular_vel_multiplier = p("angular_vel_multiplier", 1.0, "Angular velocity multiplier. Used to fine-control the actual values being sent.")
 
-        self.linear_vel_multiplier = self.get_parameter("linear_vel_multiplier").value
-        self.angular_vel_multiplier = self.get_parameter("angular_vel_multiplier").value
-
-        result: ListParametersResult = self.list_parameters([], depth=0)
-        parameters = self.get_parameters(list(result.names))
-
-        for parameter in parameters:
-            self.get_logger().info(f"{parameter.name}: {parameter.value}")
+        gridbot.log_params(self)
 
     def cleanup(self):
         self.twist_pub.publish(Twist())
