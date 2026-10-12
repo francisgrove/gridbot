@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 import time
-from rcl_interfaces.msg import ParameterDescriptor, IntegerRange, ListParametersResult
+from rcl_interfaces.msg import ParameterDescriptor
 import threading
 
 from gridbot_interfaces.srv import AngleCamera
@@ -69,7 +69,7 @@ class CameraController(Node):
         super().__init__(node_name=node_name)
 
         self._setup_parameters()
-        
+
         self.service = self.create_service(
             AngleCamera, node_name + "/set_angles", self.center_camera_callback
         )
