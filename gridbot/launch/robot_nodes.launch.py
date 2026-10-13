@@ -85,11 +85,7 @@ def generate_launch_description():
         output="screen",
         parameters=[motor_driver_config],
         condition=IfCondition(LaunchConfiguration("motors")),
-<<<<<<< HEAD
         remappings=[("cmd_vel", "twist_mux/cmd_vel")],  # for twist_mux
-=======
-        # remappings=[("cmd_vel", "cmd_vel_out")],  # for twist_mux
->>>>>>> origin/new-driving
     )
 
     camera_controller_config = os.path.join(

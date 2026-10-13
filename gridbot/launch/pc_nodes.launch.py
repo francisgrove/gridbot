@@ -141,12 +141,9 @@ def generate_launch_description():
             "--ros-args",
             "--log-level",
             [f"{pkg_name}.twist_mux:=", rosout_level],
-<<<<<<< HEAD
         ],
         remappings=[
             ("cmd_vel_out", "twist_mux/cmd_vel"),
-=======
->>>>>>> origin/new-driving
         ]
     )
 
