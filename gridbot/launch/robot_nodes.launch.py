@@ -38,21 +38,6 @@ def generate_launch_description():
         ],
     )
 
-    twist_mux_config = os.path.join(
-        pkg_share,
-        "config",
-        "twist_mux_params.yaml",
-    )
-
-    twist_mux = Node(
-        package="twist_mux",
-        executable="twist_mux",
-        name="twist_mux",
-        namespace=pkg_name,
-        output="screen",
-        parameters=[twist_mux_config],
-    )
-
     composable_nodes = [
         ComposableNode(
             package="image_proc",
@@ -100,7 +85,7 @@ def generate_launch_description():
         output="screen",
         parameters=[motor_driver_config],
         condition=IfCondition(LaunchConfiguration("motors")),
-        remappings=[("cmd_vel", "cmd_vel_out")],  # for twist_mux
+        # remappings=[("cmd_vel", "cmd_vel_out")],  # for twist_mux
     )
 
     camera_controller_config = os.path.join(

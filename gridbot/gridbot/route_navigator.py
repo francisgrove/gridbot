@@ -29,7 +29,7 @@ class PID:
         if self.prev_t is not None and t > self.prev_t:
             dt = t - self.prev_t
             self.integral += error * dt
-            out += self.k_i * self.integ_error + self.k_d * (error - self.prev_error)
+            out += self.k_i * self.integral + self.k_d * (error - self.prev_error)
 
         self.prev_error = error
         self.prev_t = t
@@ -197,8 +197,8 @@ class RouteNavigator(Node):
         self.request_route(nodes=nodes_from_msg, looking_dir=self.curr_dir)
 
     def line_offset_callback(self, msg: Float64) -> None:
-        err = float(msg.data())
-        t = self.get_clock.now().nanoseconds
+        err = float(msg.data)
+        t = self.get_clock().now().nanoseconds
 
         self.pid_output = self.pid.update(error=err, t=t)
 

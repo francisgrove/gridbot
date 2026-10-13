@@ -123,6 +123,27 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("foxglove")),
     )
 
+    
+    twist_mux_config = os.path.join(
+        pkg_share,
+        "config",
+        "twist_mux_params.yaml",
+    )
+
+    twist_mux = Node(
+        package="twist_mux",
+        executable="twist_mux",
+        name="twist_mux",
+        namespace=pkg_name,
+        output="screen",
+        parameters=[twist_mux_config],
+        arguments=[
+            "--ros-args",
+            "--log-level",
+            [f"{pkg_name}.twist_mux:=", rosout_level],
+        ]
+    )
+
     return LaunchDescription(
         [
             rosout_level_arg,
@@ -130,6 +151,7 @@ def generate_launch_description():
             grid_processor,
             route_navigator,
             route_generator,
+            twist_mux,
             foxglove_launch,
         ]
     )

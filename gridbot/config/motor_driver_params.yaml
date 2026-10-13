@@ -1,6 +1,6 @@
 /**:
   ros__parameters:
-    twist_topic: "cmd_vel"
+    twist_topic: "cmd_vel_out"
 
     left_enable_pin: 6
     left_forward_pin: 12
