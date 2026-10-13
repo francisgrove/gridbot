@@ -57,13 +57,12 @@ class GridProcessor(Node):
     aruco_roi_mask = None
 
     _is_tracking_marker: bool = False
+    _lost_top_edge: bool = False
     _old_points  = None
     _old_gray = None
 
     last_found_aruco: int
     last_found_direction: gridbot.ArucoDirection
-
-    _clahe: cv2.CLAHE
 
     h_thresh_low: int = 0
     s_low: int = 0
@@ -128,7 +127,7 @@ class GridProcessor(Node):
             CompressedImage, "camera/line_mask", qos_profile=qos
         )
 
-        self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        self._morph_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
 
         self._handler = ParameterEventHandler(self)
 
@@ -152,29 +151,21 @@ class GridProcessor(Node):
             cmprs_img_msg=msg, desired_encoding="bgr8"
         )
 
-        img_hsv = cv2.cvtColor(frame_raw, cv2.COLOR_BGR2HSV)
-        
-        h, s, v = cv2.split(img_hsv)
-        v = self._clahe.apply(v)
-        img_hsv = cv2.merge([h, s, v])
-
-        equalized = cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR)
-
-        frame = equalized
-
-        if frame is None:
+        if frame_raw is None:
             self.get_logger().error("Error while trying to read frame.")
             return
 
         # in case image resolution changes (shouldn't, but...), update ROIs
-        h, w = frame.shape[:2]
+        h, w = frame_raw.shape[:2]
         if self.img_w != w or self.img_h != h:
             self.img_w = w
             self.img_h = h
             self._prepare_rois()
 
         upper_edge, top_edge, direction = None, None, None
-        upper_edge, top_edge, direction = self._aruco_tracking(frame)
+        upper_edge, top_edge, direction = self._aruco_tracking(frame_raw)
+
+        frame = cv2.bilateralFilter(frame_raw, 9, 75, 75)
 
         centerline, target_node = self._line_tracking(frame)
         self._turning_tracking(frame)
@@ -222,6 +213,7 @@ class GridProcessor(Node):
             src1=self.aruco_roi_mask, src2=gray, mask=self.aruco_roi_mask
         )
 
+        # ==================== TRACKING MODE ====================
         if self._is_tracking_marker:
 
             new_points, st, _ = cv2.calcOpticalFlowPyrLK(
@@ -231,7 +223,7 @@ class GridProcessor(Node):
             # Immediately ignore a tracked point if it is below the bottom line
             bottom_line = self.img_h - self.aruco_padding
 
-            if new_points is None or all(st == 0):
+            if all(st == 0):
                 self.get_logger().info(
                     f"Lost all points for tag={self.last_found_aruco}. Returning to detection..."
                 )
@@ -255,17 +247,15 @@ class GridProcessor(Node):
 
             direction = self.last_found_direction
 
-            if top_edge_good is None or len(top_edge_good) != 2 or any(top_st != 1):
-
-                self.get_logger().info(
-                    f"Lost top edge for tag={self.last_found_aruco}."
-                )
-
-                if direction is not None:
+            if any(top_st != 1):
+                if not self._lost_top_edge:
+                    self._lost_top_edge = True
                     self.get_logger().info(
-                        f"Direction obtained from last known:\n{self.last_found_direction.name.capitalize()}."
+                        f"Lost top edge for tag={self.last_found_aruco}. "
+                        f"Direction from last known: {self.last_found_direction.name.capitalize()}."
                     )
             else:
+                self._lost_top_edge = False
                 direction = self._calculate_aruco_direction(
                     top_edge_good.reshape(-1, 2)
                 )
@@ -275,7 +265,7 @@ class GridProcessor(Node):
                     )
                     self.last_found_direction = direction
 
-            if upper_edge_good is None or all(upper_st == 0):
+            if all(upper_st == 0):
                 self.get_logger().info(
                     f"Lost upper edge for tag={self.last_found_aruco}. Returning to detection..."
                 )
@@ -305,7 +295,10 @@ class GridProcessor(Node):
             self._old_points = new_points[st == 1].reshape(-1, 1, 2).astype(np.float32)
             return upper_edge_new, top_edge_new, direction
 
+
+        # ==================== DETECTING MODE ====================
         else:
+            
             corners, ids, _ = self.detector.detectMarkers(gray_crop)
 
             if ids is None:
@@ -331,11 +324,13 @@ class GridProcessor(Node):
             top_edge = largest_corners[:2]
 
             self.last_found_aruco = largest_id
+            self.last_found_direction = self._calculate_aruco_direction(top_edge)
             self._old_gray = gray_crop.copy()
             self._old_points = np.array(
                 np.append(upper_points, top_edge), dtype=np.float32
             ).reshape(-1, 1, 2)
             self._is_tracking_marker = True
+            self._lost_top_edge = False
             return None, None, None
 
     def _line_tracking(self, frame_raw: np.array):
@@ -348,7 +343,7 @@ class GridProcessor(Node):
         4. For picked node, finds its offset and sends it.
         """
 
-        frame = cv2.medianBlur(frame_raw, 5)
+        frame = frame_raw
 
         camera_center = (self.img_w // 2, self.img_h // 2)
 
@@ -790,7 +785,7 @@ class GridProcessor(Node):
                 f"HSV mask | ALL H | S {s_low}:{s_high} | V {v_low}:{v_high}"
             )
 
-            return cv2.inRange(img_hsv, lower, upper)
+            mask = cv2.inRange(img_hsv, lower, upper)
 
         elif h_low < 0:
             # Wraps through 0
@@ -808,7 +803,7 @@ class GridProcessor(Node):
             mask1 = cv2.inRange(img_hsv, lower_1, upper_1)
             mask2 = cv2.inRange(img_hsv, lower_2, upper_2)
 
-            return cv2.bitwise_or(mask1, mask2)
+            mask = cv2.bitwise_or(mask1, mask2)
 
         elif h_high > 179:
             # Wraps through 179 -> 0
@@ -826,7 +821,7 @@ class GridProcessor(Node):
             mask1 = cv2.inRange(img_hsv, lower_1, upper_1)
             mask2 = cv2.inRange(img_hsv, lower_2, upper_2)
 
-            return cv2.bitwise_or(mask1, mask2)
+            mask = cv2.bitwise_or(mask1, mask2)
 
         else:
             # Normal, non-wrapping range
@@ -838,7 +833,11 @@ class GridProcessor(Node):
                 f"S {s_low}:{s_high} | V {v_low}:{v_high}"
             )
 
-            return cv2.inRange(img_hsv, lower, upper)
+            mask = cv2.inRange(img_hsv, lower, upper)
+
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self._morph_kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self._morph_kernel)
+        return mask
 
     def hsv_parameter_callback(self, p: rclpy.parameter.Parameter) -> None:
         value = rclpy.parameter.parameter_value_to_python(p.value)

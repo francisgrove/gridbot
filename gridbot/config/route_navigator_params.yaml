@@ -22,8 +22,5 @@
     k_i: 0.01
     k_d: 0.01
 
-    linear_vel: 0.3
-    angular_vel: 1.0
-
-    linear_vel_multiplier: 0.1
-    angular_vel_multiplier: 0.5
+    linear_vel: 0.15
+    angular_vel: 0.3
