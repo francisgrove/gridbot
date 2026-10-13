@@ -17,7 +17,7 @@ class PanTiltController:
 
     button: Button
 
-    def __init__(self, pulse_min, pulse_max, button_pin, pan_angle=90, tilt_angle=90):
+    def __init__(self, pulse_min, pulse_max, button_pin, pan_angle, tilt_angle):
 
         # PCA-9685 on the board
         self.kit = ServoKit(channels=16)
@@ -32,15 +32,14 @@ class PanTiltController:
 
         self._lock = threading.Lock()
 
-        self.button = Button(self.center_pin, bounce_time=0.05, pull_up=True)
+        self.button = Button(button_pin, bounce_time=0.05, pull_up=True)
         self.button.when_activated = self._center
 
     def _center(self):
         """
         Wrapper for predetermined centering angles, used via the joystick center button.
         """
-        with self._lock:
-            self.set_angle(self.pan_angle, self.tilt_angle)
+        self.set_angle(self.pan_angle, self.tilt_angle)
 
     def set_angle(self, pan_angle, tilt_angle):
         """
@@ -48,6 +47,7 @@ class PanTiltController:
         """
         with self._lock:
             try:
+                time.sleep(1.0)
                 self.kit.servo[0].angle = pan_angle
                 time.sleep(1.0)
                 self.kit.servo[1].angle = tilt_angle
@@ -79,7 +79,7 @@ class CameraController(Node):
 
 
         self.controller = PanTiltController(
-            self.pulse_min, self.pulse_max, self.button_pin
+            self.pulse_min, self.pulse_max, self.button_pin, self.default_pan_angle, self.default_tilt_angle 
         )
 
         if self.controller.kit._pca.i2c_device.device_address != self.addr:
@@ -102,6 +102,8 @@ class CameraController(Node):
         self.pulse_max = p("pulse_max", 2500, "Maximum pulse PWM for the WS-S90 servos.")
         self.addr = p("addr", 64, "I2C address of the PCA 9685 motor driver, in decimal (default 0x40 = 64).")
         self.button_pin = p("button_pin", 7, "GPIO pin of the button used for centering.")
+        self.default_pan_angle = p("default_pan_angle", 90, "Default pan angle for the camera arm.")
+        self.default_tilt_angle = p("default_tilt_angle", 90, "Default tilt angle for the camera arm.")
 
     def destroy_node(self):
         self.controller.close()
@@ -109,6 +111,9 @@ class CameraController(Node):
 
 
 def main(args=None):
+    node_name = "camera_controller"
+
+    print(f"Hello from {node_name}")
     rclpy.init(args=args)
     node = CameraController("camera_controller")
     try:
