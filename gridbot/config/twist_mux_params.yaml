@@ -6,7 +6,11 @@
         timeout: 0.01
         priority: 100
       manual_vel:
+<<<<<<< HEAD
         topic: cmd_vel
+=======
+        topic: /cmd_vel
+>>>>>>> origin/new-driving
         timeout: 0.0
         priority: 50
         
