@@ -14,8 +14,8 @@
     padding: 200
     text_padding: 25
 
-    graph_width: 3
-    graph_height: 4
+    graph_width: 1
+    graph_height: 2
 
     use_weights: false
 
