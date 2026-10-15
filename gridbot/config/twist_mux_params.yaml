@@ -1,5 +1,6 @@
 /**:
   ros__parameters:
+    use_stamped: false
     topics:
       navigator_vel:
         topic: navigator_vel_out

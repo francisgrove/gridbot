@@ -63,7 +63,8 @@ setup(
             "motor_driver = gridbot.motor_driver:main",
             "map_generator = gridbot.service_map_generator:main",
             "route_generator = gridbot.service_route_generator:main",
-            "camera_centerer = gridbot.service_camera_centerer:main",
+            "camera_controller = gridbot.service_camera_controller:main",
+            "distance_measurer = gridbot.distance_measurer:main",
         ],
     },
 )

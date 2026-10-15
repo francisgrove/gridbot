@@ -198,7 +198,7 @@ class RouteNavigator(Node):
 
     def line_offset_callback(self, msg: Float64) -> None:
         err = float(msg.data)
-        t = self.get_clock().now().nanoseconds
+        t = self.get_clock().now().nanoseconds / 1e9
 
         self.pid_output = self.pid.update(error=err, t=t)
 

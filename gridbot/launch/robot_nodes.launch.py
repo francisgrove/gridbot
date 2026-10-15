@@ -103,12 +103,29 @@ def generate_launch_description():
         parameters=[camera_controller_config],
     )
 
+    distance_measurer_config = os.path.join(
+        pkg_share,
+        "config",
+        "distance_measurer_params.yaml",
+    )
+
+    distance_measurer = Node(
+        package="gridbot",
+        executable="distance_measurer",
+        name="distance_measurer",
+        namespace=pkg_name,
+        output="screen",
+        parameters=[distance_measurer_config],
+    )
+
+
     return LaunchDescription(
         [
             motors_arg,
             camera_node,
             container,
             motor_driver,
-            camera_controller
+            camera_controller,
+            distance_measurer
         ]
     )
