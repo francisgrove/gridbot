@@ -36,13 +36,15 @@ class MotorDriver(LifecycleNode):
     left_wheel: Motor
     right_wheel: Motor
 
-    ramp_up_duration: float
+    ramp_down_duration: float
     invert_direction: bool
 
     _target_left: float = 0.0
     _target_right: float = 0.0
     _current_left: float = 0.0
     _current_right: float = 0.0
+
+    _max_vel: float = 0.5
 
     handler: ParameterEventHandler
 
@@ -148,11 +150,11 @@ class MotorDriver(LifecycleNode):
         dt = now - self._last_ramp_time
         self._last_ramp_time = now
 
-        if self.ramp_up_duration <= 0.0:
+        if self.ramp_down_duration <= 0.0:
             self._current_left = self._target_left
             self._current_right = self._target_right
         else:
-            max_step = dt / self.ramp_up_duration
+            max_step = dt / self.ramp_down_duration
 
             for attr in ("left", "right"):
                 current = getattr(self, f"_current_{attr}")
@@ -161,7 +163,7 @@ class MotorDriver(LifecycleNode):
                 if abs(diff) <= max_step:
                     current = target
                 else:
-                    current += max_step if diff > 0 else -max_step
+                    current += -max_step if diff > 0 else max_step
                 setattr(self, f"_current_{attr}", current)
 
         self.left_wheel.value = self._current_left
@@ -187,7 +189,7 @@ class MotorDriver(LifecycleNode):
         # Output
         self.vel_multiplier = p("vel_multiplier", 1.0, "Multiplier of the robot's velocity. 1.0 means full speed, 0.0 means nothing.", min_value=0.0, max_value=1.0)
         self.frequency = p("frequency", 50.0, "Frequency of the PWM pins.")
-        self.ramp_up_duration = p("ramp_up_duration", 0.5, "Time in seconds to ramp from 0 to full speed. 0 disables ramping.", min_value=0.0)
+        self.ramp_down_duration = p("ramp_down_duration", 0.5, "Time in seconds to ramp down from full speed to needed velocity. 0 disables ramping.", min_value=0.0)
         self.invert_direction = p("invert_direction", False, "Whether to invert the direction of robot's movements.")
 
         gridbot.log_params(self)

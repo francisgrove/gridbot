@@ -245,17 +245,20 @@ class RouteNavigator(Node):
 
         flags = gridbot.LineObservation(msg.data)
 
-        self.get_logger().info(
-            f"Road flags:\n [{int(bool(flags & gridbot.LineObservation.LEFT))} "
-            f"{int(bool(flags & gridbot.LineObservation.CENTER))} "
-            f"{int(bool(flags & gridbot.LineObservation.RIGHT))}]"
-        )
 
         if self.last_line_observation is None:
             self.last_line_observation = flags
             return
         elif self.last_line_observation == flags:
             return
+
+        if flags != self.last_line_observation and self.last_line_observation is not None:        
+            self.get_logger().info(
+                f"Road flags:\n [{int(bool(flags & gridbot.LineObservation.LEFT))} "
+                f"{int(bool(flags & gridbot.LineObservation.CENTER))} "
+                f"{int(bool(flags & gridbot.LineObservation.RIGHT))}]"
+            )
+
 
         curr_center = flags & gridbot.LineObservation.CENTER
 
@@ -323,7 +326,6 @@ class RouteNavigator(Node):
 
                 if self.node_reached:
                     self.get_logger().info(f"Node {self.curr_pos} reached.")
-
                     self.node_reached = False
                     self.curr_state = gridbot.RobotState.PAUSED
                     self.pause_start = self.get_clock().now().nanoseconds
@@ -349,7 +351,7 @@ class RouteNavigator(Node):
                 twist_msg.angular.z = 0.0
 
                 time_passed = self.get_clock().now().nanoseconds - self.pause_start
-                if time_passed > self.pause_start * 1e9:
+                if time_passed > self.pause_duration * 1e9:
                     self.get_logger().info(f"Unpaused after {time_passed/1e9} seconds.")
 
                     if self.clear_route:
@@ -367,7 +369,7 @@ class RouteNavigator(Node):
 
                     if len(self.robot_route) > 0:
                         self.get_logger().info(
-                            f"Next route plan: {self.robot_route[0].directions[0].name} for node {self.robot_route[0].name}"
+                            f"Next route plan: {gridbot.RobotDirection(self.robot_route[0].directions[0])} for node {self.robot_route[0].name}"
                         )
                     else:
                         self.get_logger().info(f"Finished route.")

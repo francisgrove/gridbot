@@ -16,7 +16,7 @@
             <max_linear_acceleration>0.33</max_linear_acceleration>
 
             <!-- Input -->
-            <topic>cmd_vel</topic>
+            <topic>navigator_vel_out</topic>
 
             
             <!-- Output -->

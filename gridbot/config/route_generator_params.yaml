@@ -2,3 +2,4 @@
   ros__parameters:
     # swap for appropriate map graph if generated
     graph_filepath: "ros2_ws/src/gridbot/config/map_graph.yaml" 
+    turn_penalty_factor: 1.0

@@ -19,6 +19,8 @@ class RouteGenerator(Node):
     graph_width: int
     graph_height: int
 
+    looking_dir: gridbot.ArucoDirection
+
     def __init__(self, node_name):
         super().__init__(node_name)
 
@@ -27,6 +29,13 @@ class RouteGenerator(Node):
             "graph_filepath",
             "",
             "Filepath of the map graph yaml file. It contains the adjacency map as well as the map's dimensions.",
+        )
+
+        self.turn_penalty_factor = gridbot.declare_param(
+            self,
+            "turn_penalty_factor",
+            1.0,
+            "Factor [0.0, 1.0] for turn penalty. 0.0 disables turn penalty.",
         )
 
         with open(graph_path) as f:
@@ -56,7 +65,7 @@ class RouteGenerator(Node):
         )
 
         self.dims_service = self.create_service(
-            GetDims, f"{node_name}/get_dims",self.get_dims_callback
+            GetDims, f"{node_name}/get_dims", self.get_dims_callback
         )
 
         self.get_logger().info("Graph Loaded successfully")
@@ -64,7 +73,7 @@ class RouteGenerator(Node):
     def get_dims_callback(self, request, response):
         response.graph_width = self.graph_width
         response.graph_height = self.graph_height
-        
+
         return response
 
     def generate_route_callback(self, request, response):
@@ -83,7 +92,7 @@ class RouteGenerator(Node):
             response.route = []
             return response
 
-        looking_dir = gridbot.ArucoDirection(request.looking_dir)
+        self.looking_dir = gridbot.ArucoDirection(request.looking_dir)
 
         route = []
 
@@ -111,8 +120,10 @@ class RouteGenerator(Node):
             )
             route.append(node)
 
-        self._add_directions(start_dir=looking_dir, start_node=path[0], route=route)
-        self.get_logger().info("Route is:\n" + "\n".join(str(node) for node in route))
+        self._add_directions(start_node=path[0], route=route)
+        self.get_logger().info(
+            "Route is:\n" + "\n".join(str(node.name) for node in route)
+        )
 
         response.route = route
 
@@ -120,14 +131,13 @@ class RouteGenerator(Node):
 
     def _add_directions(
         self,
-        start_dir: gridbot.RobotDirection,
         start_node: str,
         route: list[gridbot.RouteNode],
     ):
         if not route:
             return
 
-        curr_dir = start_dir
+        curr_dir = self.looking_dir
         curr_node = start_node
 
         for next_node in route:
@@ -140,9 +150,9 @@ class RouteGenerator(Node):
             if target_dir is None:
                 return
 
-            dir_diff = (target_dir.value - curr_dir.value) % 4
+            direction_diff = (target_dir.value - curr_dir.value) % 4
 
-            match dir_diff:
+            match direction_diff:
                 case 0:
                     # Already facing the correct direction.
                     pass
@@ -180,31 +190,19 @@ class RouteGenerator(Node):
                         for neighbor in neighbors
                     )
 
-                    if has_right and has_left:
-                        next_node.directions.append(
-                            gridbot.RobotDirection.TURN_LEFT.value
-                        )
-                        next_node.directions.append(
-                            gridbot.RobotDirection.TURN_LEFT.value
-                        )
-                    elif has_right and not has_left:
-                        next_node.directions.append(
-                            gridbot.RobotDirection.TURN_RIGHT.value
-                        )
-                        next_node.directions.append(
-                            gridbot.RobotDirection.TURN_RIGHT.value
-                        )
-                    elif not has_right and has_left:
-                        next_node.directions.append(
-                            gridbot.RobotDirection.TURN_LEFT.value
-                        )
-                        next_node.directions.append(
-                            gridbot.RobotDirection.TURN_LEFT.value
-                        )
+                    turn = None
+
+                    if has_right and not has_left:
+                        turn = gridbot.RobotDirection.TURN_LEFT.value
                     else:
-                        next_node.directions.append(
-                            gridbot.RobotDirection.TURN_LEFT.value
-                        )
+                        turn = gridbot.RobotDirection.TURN_RIGHT.value
+
+                    # turn in the neighbor-less direction (only one penalty)
+                    # if both directions have neighbors, turn (right) twice
+                    # if none, turn (right) once
+                    next_node.directions.append(turn)
+                    if has_right and has_left:
+                        next_node.directions.append(turn)
 
                 case 3:
                     next_node.directions.append(gridbot.RobotDirection.TURN_LEFT.value)
@@ -214,13 +212,19 @@ class RouteGenerator(Node):
             curr_dir = target_dir
             curr_node = next_node.name
 
-    def _get_direction_between(
-        self, node_a: str, node_b: str
-    ) -> gridbot.ArucoDirection | None:
+    def _get_distance_between(self, node_a: str, node_b: str) -> tuple[int, int]:
         xa, ya = gridbot.node_to_coords(node_a)
         xb, yb = gridbot.node_to_coords(node_b)
 
         dx, dy = xb - xa, yb - ya
+
+        return (dx, dy)
+
+    def _get_direction_between(
+        self, node_a: str, node_b: str
+    ) -> gridbot.ArucoDirection | None:
+
+        dx, dy = self._get_distance_between(node_a, node_b)
 
         dx = max(-1, min(1, dx))
         dy = max(-1, min(1, dy))
@@ -247,6 +251,29 @@ class RouteGenerator(Node):
             if (direction := self._get_direction_between(node, neighbor)) is not None
         }
 
+    class GridCell:
+        cost: float
+        name: str
+        direction: gridbot.ArucoDirection
+
+        def __init__(self, cost, name, direction):
+            self.cost = cost
+            self.name = name
+            self.direction = direction
+
+        def __lt__(self, other):
+            return self.cost < other.cost
+
+        def __le__(self, other):
+            return self.cost <= other.cost
+
+        def __eq__(self, other):
+            print(type(other))
+            return (self.name, self.direction) == (other.name, other.direction)
+
+        def __hash__(self):
+            return hash((self.name, self.direction))
+
     def a_star(self, start_node: str, goal_node: str):
         if start_node not in self.graph or goal_node not in self.graph:
             self.get_logger().error(
@@ -255,55 +282,55 @@ class RouteGenerator(Node):
             return []
 
         open_set = []
-        heapq.heappush(open_set, (0, start_node))
-
+        closed_set = set()
         came_from = {}
-        g_score = defaultdict(lambda: float("inf"))
-        g_score[start_node] = 0
-        f_score = defaultdict(lambda: float("inf"))
-        f_score[start_node] = self.manhattan(start_node, goal_node)
-        self.get_logger().info(
-            f"[start] Manhattan for {start_node} and {goal_node} == {f_score[start_node]}"
+
+        start_cell = self.GridCell(
+            cost=self.manhattan(start_node, goal_node),
+            name=start_node,
+            direction=self.looking_dir,
         )
+        heapq.heappush(open_set, start_cell)
+
+        g_score = defaultdict(lambda: float("inf"))
+        g_score[start_cell] = 0.0
 
         while open_set:
-            curr_f, curr_node = heapq.heappop(open_set)
+            curr_cell = heapq.heappop(open_set)
 
-            if curr_node == goal_node:
-                path = self.reconstruct_path(came_from, curr_node)
+            if curr_cell in closed_set:
+                continue
+
+            closed_set.add(curr_cell)
+
+            if curr_cell.name == goal_node:
+                path = self.reconstruct_path(came_from, curr_cell)
+
                 return path
 
-            for neighbor, weight in self.graph[curr_node].items():
+            for n_name, n_weight in self.graph[curr_cell.name].items():
 
                 self.get_logger().info(
-                    f"[{curr_node}]'s neighbor: {neighbor} with weight == {weight}"
+                    f"[{curr_cell.name}]'s neighbor: {n_name} with weight == {n_weight}"
                 )
 
-                tentative_g_score = g_score[curr_node] + weight
+                target_dir = self._get_direction_between(curr_cell.name, n_name)
 
-                if tentative_g_score < g_score[neighbor]:
-                    came_from[neighbor] = curr_node
-                    g_score[neighbor] = tentative_g_score
+                dir_diff = (target_dir.value - curr_cell.direction.value) % 4
 
-                    manhattan = self.manhattan(neighbor, goal_node)
+                n_cell = self.GridCell(cost=0.0, name=n_name, direction=target_dir)
 
-                    f_score[neighbor] = tentative_g_score + manhattan
+                tentative_g_score = g_score[curr_cell] + n_weight + dir_diff * self.turn_penalty_factor
 
-                    self.get_logger().info(
-                        f"Manhattan for {neighbor} and {goal_node} == {manhattan}"
-                    )
+                if tentative_g_score < g_score[n_cell]:
 
-                    self.get_logger().info(
-                        f"F score for {neighbor} and {goal_node} == {f_score[neighbor]}"
-                    )
+                    came_from[n_cell] = curr_cell
 
-                    if (f_score[neighbor], neighbor) not in open_set:
-                        heapq.heappush(
-                            open_set,
-                            (f_score[neighbor], neighbor),
-                        )
-                    else:
-                        self.get_logger().warn(f"{neighbor} already in open set.   ")
+                    g_score[n_cell] = tentative_g_score
+
+                    n_cell.cost = tentative_g_score + self.manhattan(n_name, goal_node)
+
+                    heapq.heappush(open_set, n_cell)
 
         self.get_logger().info(f"No path found between {start_node} and {goal_node}.")
         return []
@@ -313,16 +340,11 @@ class RouteGenerator(Node):
         xb, yb = gridbot.node_to_coords(node_b)
         return abs(xa - xb) + abs(ya - yb)
 
-    def euclidean(self, node_a, node_b):
-        xa, ya = gridbot.node_to_coords(node_a)
-        xb, yb = gridbot.node_to_coords(node_b)
-        return math.sqrt((xa - xb) ** 2, (ya - yb) ** 2)
-
     def reconstruct_path(self, came_from, current):
-        path = [current]
+        path = [current.name]
         while current in came_from:
             current = came_from[current]
-            path.append(current)
+            path.append(current.name)
         path.reverse()
         return path
 

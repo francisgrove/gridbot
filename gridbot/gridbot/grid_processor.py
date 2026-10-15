@@ -242,7 +242,6 @@ class GridProcessor(Node):
             upper_st = st[:2]
             top_st = st[2:]
 
-            upper_edge_good = upper_edge_new[upper_st == 1]
             top_edge_good = top_edge_new[top_st == 1]
 
             direction = self.last_found_direction
@@ -265,7 +264,7 @@ class GridProcessor(Node):
                     )
                     self.last_found_direction = direction
 
-            if all(upper_st == 0):
+            if any(upper_st == 0):
                 self.get_logger().info(
                     f"Lost upper edge for tag={self.last_found_aruco}. Returning to detection..."
                 )
@@ -292,7 +291,9 @@ class GridProcessor(Node):
                 return upper_edge_new, top_edge_new, direction
 
             self._old_gray = gray_crop
-            self._old_points = new_points[st == 1].reshape(-1, 1, 2).astype(np.float32)
+            # self._old_points = new_points[st == 1].reshape(-1, 1, 2).astype(np.float32)
+            # ensure we always have 4 points
+            self._old_points = new_points.reshape(-1, 1, 2).astype(np.float32)
             return upper_edge_new, top_edge_new, direction
 
 
@@ -370,6 +371,7 @@ class GridProcessor(Node):
 
         centerline = self._get_centerline(max_line_mask)
 
+
         if centerline is None or len(centerline) == 0:
             return None, None
 
@@ -379,7 +381,9 @@ class GridProcessor(Node):
         # in case of very few nodes (as node offset shouldn't be too high) it's fine.
         target_idx = min(len(centerline), self.followed_node_offset)
 
-        target_node = centerline[-target_idx]
+        target_node = centerline[target_idx-1]
+
+        # self.get_logger().info(f"For offset: {self.followed_node_offset} we pick node: {target_idx} for centerline of length {len(centerline)})")
 
         pixel_error = camera_center[0] - target_node[0]
 
@@ -673,9 +677,8 @@ class GridProcessor(Node):
     def _get_centerline(self, src):
         centerline = []
 
-        h, w = src.shape[:2]
 
-        for i in range(0, h - self.midline_step, self.midline_step):
+        for i in range(0, self.img_h - self.midline_step, self.midline_step):
             row = src[i, :, 0] > 0
 
             if len(row) == 0:
@@ -707,7 +710,7 @@ class GridProcessor(Node):
                     bound.clear()
 
             # in case of multiple lane ranges, pick the one closest to image center
-            center = w // 2
+            center = self.img_w // 2
             leftmost = None
             rightmost = None
             best_range = None
@@ -730,6 +733,7 @@ class GridProcessor(Node):
             middle_x = (leftmost + rightmost) // 2
             centerline.append((middle_x, i))
 
+        centerline.reverse()
         return centerline
 
     def _get_centroid(self, contour):

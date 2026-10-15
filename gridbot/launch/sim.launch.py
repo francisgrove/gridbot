@@ -279,7 +279,7 @@ def generate_launch_description():
             spawn_robot,
             grid_processor,
             route_navigator,
-            twist_mux,
+            # twist_mux,
             foxglove_launch,
         ]
     )

@@ -6,8 +6,8 @@
     user_cmd_topic: "user_cmd"
     twist_topic: "navigator_vel_out"
 
-    dims_service: "/gridbot/route_generator/get_dims"
-    route_service: "/gridbot/route_generator/generate_route"
+    dims_service: "route_generator/get_dims"
+    route_service: "route_generator/generate_route"
 
     map_graph_filepath: "config/map_graph.yaml"
 
@@ -18,9 +18,9 @@
     lost_timeout: 5.0
 
     timer_period: 0.005
-    k_p: 1.0
-    k_i: 0.01
-    k_d: 0.01
+    k_p: 2.0
+    k_i: 0.0
+    k_d: 0.0
 
-    linear_vel: 0.15
-    angular_vel: 0.3
+    linear_vel: 0.06
+    angular_vel: 0.5

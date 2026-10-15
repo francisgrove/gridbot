@@ -29,6 +29,6 @@
     aruco_padding: 25
     
     midline_step: 30
-    followed_node_offset: 3
+    followed_node_offset: 4
 
     prepare_tracked_image: true
