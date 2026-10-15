@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 
 from gpiozero import DistanceSensor
-import gridbot_helpers as gridbot
+import gridbot.gridbot_helpers as gridbot
 
 from std_msgs.msg import Float32
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
@@ -13,7 +13,9 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 class DistanceMeasurer(Node):
 
     def __init__(self, node_name):
-        super.__init__(node_name)
+        super().__init__(node_name)
+
+        self._setup_parameters()
 
         self.sensor = DistanceSensor(echo=self.echo_pin, trigger=self.trigger_pin)
 
@@ -27,10 +29,10 @@ class DistanceMeasurer(Node):
         self.distance_pub = self.create_publisher(
             msg_type=Float32,
             topic=self.distance_topic,
-            qos = qos
+            qos_profile = qos
         )
 
-        self.timer = self.create_timer(1/40000, self.distance_callback)
+        self.timer = self.create_timer(0.01, self.distance_callback)
 
     def distance_callback(self):
 
@@ -41,11 +43,11 @@ class DistanceMeasurer(Node):
         self.distance_pub.publish(msg)
 
     def _setup_parameters(self):
-        p = partial(gridbot.declare_param,p)
+        p = partial(gridbot.declare_param,self)
 
         self.distance_topic = p("distance_topic", "ranging", "Topic used to send SR04 distance messages to.")
         self.trigger_pin = p("trigger_pin", 22, "GPIO pin for the trigger pin of the SR04 distance sensor.")
-        self.echo_pin = p("trigger_pin", 27, "GPIO pin for the echo pin of the SR04 distance sensor.")
+        self.echo_pin = p("echo_pin", 27, "GPIO pin for the echo pin of the SR04 distance sensor.")
 
         
 

@@ -5,4 +5,4 @@
     addr: 64
     button_pin: 7
     default_pan_angle: 90
-    default_tilt_angle: 135
+    default_tilt_angle: 125
