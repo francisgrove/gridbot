@@ -1,0 +1,5 @@
+/**:
+  ros__parameters:
+    distance_topic: "ranging"
+    trigger_pin: 22
+    echo_pin: 27

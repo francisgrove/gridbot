@@ -38,21 +38,6 @@ def generate_launch_description():
         ],
     )
 
-    twist_mux_config = os.path.join(
-        pkg_share,
-        "config",
-        "twist_mux_params.yaml",
-    )
-
-    twist_mux = Node(
-        package="twist_mux",
-        executable="twist_mux",
-        name="twist_mux",
-        namespace=pkg_name,
-        output="screen",
-        parameters=[twist_mux_config],
-    )
-
     composable_nodes = [
         ComposableNode(
             package="image_proc",
@@ -100,7 +85,7 @@ def generate_launch_description():
         output="screen",
         parameters=[motor_driver_config],
         condition=IfCondition(LaunchConfiguration("motors")),
-        remappings=[("cmd_vel", "cmd_vel_out")],  # for twist_mux
+        remappings=[("cmd_vel", "twist_mux/cmd_vel")],  # for twist_mux
     )
 
     camera_controller_config = os.path.join(
@@ -118,12 +103,29 @@ def generate_launch_description():
         parameters=[camera_controller_config],
     )
 
+    distance_measurer_config = os.path.join(
+        pkg_share,
+        "config",
+        "distance_measurer_params.yaml",
+    )
+
+    distance_measurer = Node(
+        package="gridbot",
+        executable="distance_measurer",
+        name="distance_measurer",
+        namespace=pkg_name,
+        output="screen",
+        parameters=[distance_measurer_config],
+    )
+
+
     return LaunchDescription(
         [
             motors_arg,
             camera_node,
             container,
             motor_driver,
-            camera_controller
+            camera_controller,
+            distance_measurer
         ]
     )

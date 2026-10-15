@@ -72,6 +72,45 @@ def generate_launch_description():
         ],
     )
 
+
+
+    route_generator_config = os.path.join(
+        pkg_share,
+        "config",
+        "route_generator_params.yaml",
+    )
+
+
+
+    route_generator = Node(
+        package="gridbot",
+        executable="route_generator",
+        name="route_generator",
+        namespace=pkg_name,
+        output="screen",
+        parameters=[route_generator_config],
+        arguments=[
+            "--ros-args",
+            "--log-level",
+            [f"{pkg_name}.route_generator:=", rosout_level],
+        ],
+    )
+
+    route_navigator = Node(
+        package="gridbot",
+        executable="route_navigator",
+        name="route_navigator",
+        namespace=pkg_name,
+        output="screen",
+        parameters=[route_navigator_config],
+        arguments=[
+            "--ros-args",
+            "--log-level",
+            [f"{pkg_name}.route_navigator:=", rosout_level],
+        ],
+    )
+
+
     foxglove_pkg_share = get_package_share_directory("foxglove_bridge")
     foxglove_launch_path = os.path.join(
         foxglove_pkg_share,
@@ -84,12 +123,38 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("foxglove")),
     )
 
+    
+    twist_mux_config = os.path.join(
+        pkg_share,
+        "config",
+        "twist_mux_params.yaml",
+    )
+
+    twist_mux = Node(
+        package="twist_mux",
+        executable="twist_mux",
+        name="twist_mux",
+        namespace=pkg_name,
+        output="screen",
+        parameters=[twist_mux_config],
+        arguments=[
+            "--ros-args",
+            "--log-level",
+            [f"{pkg_name}.twist_mux:=", rosout_level],
+        ],
+        remappings=[
+            ("cmd_vel_out", "twist_mux/cmd_vel"),
+        ]
+    )
+
     return LaunchDescription(
         [
             rosout_level_arg,
             foxglove_arg,
             grid_processor,
             route_navigator,
+            route_generator,
+            twist_mux,
             foxglove_launch,
         ]
     )

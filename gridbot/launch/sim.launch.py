@@ -248,9 +248,6 @@ def generate_launch_description():
             "--log-level",
             [f"{pkg_name}.twist_mux:=", rosout_level],
         ],
-        remappings=[
-            ('cmd_vel_out', )
-        ]
     )
 
     foxglove_pkg_share = get_package_share_directory("foxglove_bridge")

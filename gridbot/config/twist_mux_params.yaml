@@ -1,12 +1,13 @@
 /**:
   ros__parameters:
+    use_stamped: false
     topics:
-    navigator_vel:
-        topic: route_navigator/output_vel
-        timeout: 0.01 # for now, double the frequency in route_navigator
+      navigator_vel:
+        topic: navigator_vel_out
+        timeout: 0.01
         priority: 100
-    manual_vel:
+      manual_vel:
         topic: cmd_vel
-        timeout: 0.00 
+        timeout: 0.0
         priority: 50
         

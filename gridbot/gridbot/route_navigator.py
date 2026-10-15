@@ -29,7 +29,7 @@ class PID:
         if self.prev_t is not None and t > self.prev_t:
             dt = t - self.prev_t
             self.integral += error * dt
-            out += self.k_i * self.integ_error + self.k_d * (error - self.prev_error)
+            out += self.k_i * self.integral + self.k_d * (error - self.prev_error)
 
         self.prev_error = error
         self.prev_t = t
@@ -52,9 +52,6 @@ class RouteNavigator(Node):
 
     linear_vel: float
     angular_vel: float
-
-    linear_vel_multiplier: float
-    angular_vel_multiplier: float
 
     pause_start = 0
 
@@ -200,8 +197,8 @@ class RouteNavigator(Node):
         self.request_route(nodes=nodes_from_msg, looking_dir=self.curr_dir)
 
     def line_offset_callback(self, msg: Float64) -> None:
-        err = float(msg.data())
-        t = self.get_clock.now().nanoseconds
+        err = float(msg.data)
+        t = self.get_clock().now().nanoseconds / 1e9
 
         self.pid_output = self.pid.update(error=err, t=t)
 
@@ -321,12 +318,8 @@ class RouteNavigator(Node):
         match self.curr_state:
             case gridbot.RobotState.MOVING:
 
-                twist_msg.linear.x = float(
-                    self.linear_vel * self.linear_vel_multiplier,
-                )
-                twist_msg.angular.z = float(
-                    self.angular_vel * self.angular_vel_multiplier * self.pid_output,
-                )
+                twist_msg.linear.x = float(self.linear_vel)
+                twist_msg.angular.z = float(self.angular_vel * self.pid_output)
 
                 if self.node_reached:
                     self.get_logger().info(f"Node {self.curr_pos} reached.")
@@ -343,9 +336,7 @@ class RouteNavigator(Node):
                     else 1 if next_dir == gridbot.RobotDirection.TURN_LEFT else 0
                 )
 
-                twist_msg.angular.z = float(
-                    self.angular_vel * self.angular_vel_multiplier * turn_dir
-                )
+                twist_msg.angular.z = float(self.angular_vel * turn_dir)
 
                 if self.center_found:
                     self.get_logger().info(f"Line centered")
@@ -421,10 +412,8 @@ class RouteNavigator(Node):
         )
 
         # Velocities
-        self.linear_vel = p("linear_vel", 0.5, "Linear velocity value of the robot, in m/s.")
-        self.angular_vel = p("angular_vel", 10.0, "Angular velocity value of the robot, in rad/s.")
-        self.linear_vel_multiplier = p("linear_vel_multiplier", 1.0, "Linear velocity multiplier. Used to fine-control the actual values being sent.")
-        self.angular_vel_multiplier = p("angular_vel_multiplier", 1.0, "Angular velocity multiplier. Used to fine-control the actual values being sent.")
+        self.linear_vel = p("linear_vel", 0.15, "Normalized forward speed (0..1).", min_value=0.0, max_value=1.0)
+        self.angular_vel = p("angular_vel", 0.3, "Normalized turning speed (0..1).", min_value=0.0, max_value=1.0)
 
         gridbot.log_params(self)
 

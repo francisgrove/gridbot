@@ -13,8 +13,10 @@
     wheel_radius: 0.021
     wheel_separation: 0.08382
 
-    vel_multiplier: 0.06
+    vel_multiplier: 0.5
 
-    frequency: 50.0
+    ramp_up_duration: 0.5
+
+    frequency: 1000.0
 
     invert_direction: true

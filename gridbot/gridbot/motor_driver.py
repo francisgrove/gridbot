@@ -36,7 +36,13 @@ class MotorDriver(LifecycleNode):
     left_wheel: Motor
     right_wheel: Motor
 
+    ramp_up_duration: float
     invert_direction: bool
+
+    _target_left: float = 0.0
+    _target_right: float = 0.0
+    _current_left: float = 0.0
+    _current_right: float = 0.0
 
     handler: ParameterEventHandler
 
@@ -90,6 +96,9 @@ class MotorDriver(LifecycleNode):
             callback=self.vel_multiplier_callback,
         )
 
+        self._last_ramp_time = self.get_clock().now().nanoseconds / 1e9
+        self._ramp_timer = self.create_timer(0.02, self._ramp_callback)
+
         self.context.on_shutdown(self.cleanup)
 
     def vel_multiplier_callback(self, p: rclpy.parameter.Parameter) -> None:
@@ -100,6 +109,10 @@ class MotorDriver(LifecycleNode):
         self.vel_multiplier = rclpy.parameter.parameter_value_to_python(p.value)  # type: ignore
 
     def cleanup(self):
+        self._target_left = 0.0
+        self._target_right = 0.0
+        self._current_left = 0.0
+        self._current_right = 0.0
         self.left_wheel.value = 0
         self.right_wheel.value = 0
 
@@ -115,10 +128,10 @@ class MotorDriver(LifecycleNode):
 
         right_wheel_vel = (
             linear_vel + (angular_vel * self.wheel_separation / 2.0)
-        ) / self.wheel_radius
+        ) # / self.wheel_radius
         left_wheel_vel = (
             linear_vel - (angular_vel * self.wheel_separation / 2.0)
-        ) / self.wheel_radius
+        ) # / self.wheel_radius
 
         self.get_logger().info(
             f"Raw wheel values - Left: {left_wheel_vel:.4f}, Right: {right_wheel_vel:.4f}"
@@ -127,12 +140,32 @@ class MotorDriver(LifecycleNode):
         left_val = self.vel_multiplier * max(-1.0, min(left_wheel_vel, 1.0))
         right_val = self.vel_multiplier * max(-1.0, min(right_wheel_vel, 1.0))
 
-        self.get_logger().info(
-            f"Outputting to Pins - Left: {left_val:.4f}, Right: {right_val:.4f}"
-        )
+        self._target_left = left_val
+        self._target_right = right_val
 
-        self.left_wheel.value = left_val
-        self.right_wheel.value = right_val
+    def _ramp_callback(self):
+        now = self.get_clock().now().nanoseconds / 1e9
+        dt = now - self._last_ramp_time
+        self._last_ramp_time = now
+
+        if self.ramp_up_duration <= 0.0:
+            self._current_left = self._target_left
+            self._current_right = self._target_right
+        else:
+            max_step = dt / self.ramp_up_duration
+
+            for attr in ("left", "right"):
+                current = getattr(self, f"_current_{attr}")
+                target = getattr(self, f"_target_{attr}")
+                diff = target - current
+                if abs(diff) <= max_step:
+                    current = target
+                else:
+                    current += max_step if diff > 0 else -max_step
+                setattr(self, f"_current_{attr}", current)
+
+        self.left_wheel.value = self._current_left
+        self.right_wheel.value = self._current_right
 
     def _setup_parameters(self):
         p = partial(gridbot.declare_param, self)
@@ -154,6 +187,7 @@ class MotorDriver(LifecycleNode):
         # Output
         self.vel_multiplier = p("vel_multiplier", 1.0, "Multiplier of the robot's velocity. 1.0 means full speed, 0.0 means nothing.", min_value=0.0, max_value=1.0)
         self.frequency = p("frequency", 50.0, "Frequency of the PWM pins.")
+        self.ramp_up_duration = p("ramp_up_duration", 0.5, "Time in seconds to ramp from 0 to full speed. 0 disables ramping.", min_value=0.0)
         self.invert_direction = p("invert_direction", False, "Whether to invert the direction of robot's movements.")
 
         gridbot.log_params(self)
