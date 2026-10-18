@@ -122,7 +122,7 @@ class RouteGenerator(Node):
 
         self._add_directions(start_node=path[0], route=route)
         self.get_logger().info(
-            "Route is:\n" + "\n".join(str(node.name) for node in route)
+            "Route is:\n" + ", ".join(str(node.name) for node in route)
         )
 
         response.route = route
@@ -310,17 +310,19 @@ class RouteGenerator(Node):
 
             for n_name, n_weight in self.graph[curr_cell.name].items():
 
-                self.get_logger().info(
-                    f"[{curr_cell.name}]'s neighbor: {n_name} with weight == {n_weight}"
-                )
-
                 target_dir = self._get_direction_between(curr_cell.name, n_name)
 
                 dir_diff = (target_dir.value - curr_cell.direction.value) % 4
 
                 n_cell = self.GridCell(cost=0.0, name=n_name, direction=target_dir)
 
-                tentative_g_score = g_score[curr_cell] + n_weight + dir_diff * self.turn_penalty_factor
+                turn_penalty = dir_diff * self.turn_penalty_factor
+
+                tentative_g_score = g_score[curr_cell] + n_weight + turn_penalty
+
+                self.get_logger().info(
+                    f"[{curr_cell.name}]'s neighbor: {n_name}, weight: {n_weight}, turn penalty: {turn_penalty}\nCalculated g score: {tentative_g_score}"
+                )
 
                 if tentative_g_score < g_score[n_cell]:
 

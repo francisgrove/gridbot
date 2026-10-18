@@ -32,17 +32,16 @@ class GridProcessor(Node):
     line_color: list
     line_roi_height: float
     center_line_roi_width: int
-    sides_line_roi_width: int
 
     aruco_roi_width: int
     aruco_roi_height: float
 
-    line_turning_threshold: float
+    line_turning_min_angle: float
     aruco_padding: int
-    midline_step: int
-    followed_node_offset: int
+    centerline_step: int
+    centerline_node_offset: int
 
-    centerline_color: tuple = (0, 0, 200)
+    centerline_color: tuple = (200, 0, 0)
     node_color: tuple = (0, 150, 0)
     followed_node_color: tuple = (0, 255, 0)
 
@@ -51,14 +50,12 @@ class GridProcessor(Node):
 
     img_w: int = 0
     img_h: int = 0
-    center_roi_mask = None
-    left_roi_mask  = None
-    right_roi_mask = None
-    aruco_roi_mask = None
+    _center_roi: tuple = None
+    _aruco_roi: tuple = None
 
     _is_tracking_marker: bool = False
     _lost_top_edge: bool = False
-    _old_points  = None
+    _old_points = None
     _old_gray = None
 
     last_found_aruco: int
@@ -106,7 +103,7 @@ class GridProcessor(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
-        
+
         self.camera_sub = self.create_subscription(
             CompressedImage, self.camera_topic, self.image_callback, qos_profile=qos
         )
@@ -160,24 +157,26 @@ class GridProcessor(Node):
         if self.img_w != w or self.img_h != h:
             self.img_w = w
             self.img_h = h
-            self._prepare_rois()
+            self._prepare_roi_limits()
 
         upper_edge, top_edge, direction = None, None, None
         upper_edge, top_edge, direction = self._aruco_tracking(frame_raw)
 
-        frame = cv2.bilateralFilter(frame_raw, 9, 75, 75)
+        self._color_mask_buf[:] = 0
+        color_crop = frame_raw[self._color_roi_y_start :]
+        crop_mask = self._get_mask_from_color(img=color_crop, color=self.line_color)
+        self._color_mask_buf[self._color_roi_y_start :] = crop_mask
 
-        centerline, target_node = self._line_tracking(frame)
-        self._turning_tracking(frame)
+        centerline, target_node = self._line_tracking(self._color_mask_buf)
+        self._turning_tracking(self._color_mask_buf)
 
         if self.prepare_tracked_image:
             tracked_image = self._prepare_image_with_trackers(
-                frame, upper_edge, top_edge, direction, centerline, target_node, 1.5
+                frame_raw, upper_edge, top_edge, direction, centerline, target_node, 1.5
             )
 
             tracked_image_msg = bridge.cv2_to_compressed_imgmsg(cvim=tracked_image)
             self.tracked_image_pub.publish(tracked_image_msg)
-
 
     def _aruco_tracking(self, frame: np.array):
         """
@@ -207,11 +206,10 @@ class GridProcessor(Node):
         Once the upper corners cross the boundary line at the bottom of the screen, the robot is considered to have "passed" the marker by standing on it.
         """
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        gray_crop = cv2.bitwise_and(
-            src1=self.aruco_roi_mask, src2=gray, mask=self.aruco_roi_mask
-        )
+        y0, _, x0, x1 = self._aruco_roi
+        self._gray_buf[:] = 0
+        self._gray_buf[y0:, x0:x1] = cv2.cvtColor(frame[y0:, x0:x1], cv2.COLOR_BGR2GRAY)
+        gray_crop = self._gray_buf
 
         # ==================== TRACKING MODE ====================
         if self._is_tracking_marker:
@@ -290,16 +288,13 @@ class GridProcessor(Node):
                 self._old_points = None
                 return upper_edge_new, top_edge_new, direction
 
-            self._old_gray = gray_crop
-            # self._old_points = new_points[st == 1].reshape(-1, 1, 2).astype(np.float32)
-            # ensure we always have 4 points
+            self._old_gray = gray_crop.copy()
             self._old_points = new_points.reshape(-1, 1, 2).astype(np.float32)
             return upper_edge_new, top_edge_new, direction
 
-
         # ==================== DETECTING MODE ====================
         else:
-            
+
             corners, ids, _ = self.detector.detectMarkers(gray_crop)
 
             if ids is None:
@@ -334,7 +329,7 @@ class GridProcessor(Node):
             self._lost_top_edge = False
             return None, None, None
 
-    def _line_tracking(self, frame_raw: np.array):
+    def _line_tracking(self, line_bitmask: np.array):
         """
         1. Masks out the frame by the line_color. Converts each bit island to a contour.
         2. Picks the contour by these criteria:
@@ -344,46 +339,38 @@ class GridProcessor(Node):
         4. For picked node, finds its offset and sends it.
         """
 
-        frame = frame_raw
-
         camera_center = (self.img_w // 2, self.img_h // 2)
 
-        line_bitmask = self._get_mask_from_color(img=frame, color=self.line_color)
+        y0, y1, x0, x1 = self._center_roi
+        roi_slice = line_bitmask[y0:y1, x0:x1]
 
-        line_bitmask_crop = cv2.bitwise_and(
-            src1=line_bitmask, src2=line_bitmask, mask=self.center_roi_mask
-        )
-
-        line_contours = self._get_contours(line_bitmask_crop)
+        line_contours = self._get_contours(roi_slice)
 
         if len(line_contours) == 0:
             return None, None
 
         max_line_contour = max(line_contours, key=cv2.contourArea)
+        max_line_contour = max_line_contour + np.array([x0, y0])
 
-        max_line_mask = np.zeros_like(frame)
-        cv2.drawContours(max_line_mask, [max_line_contour], -1, (255, 255, 255), -1)
+        self._line_mask_buf[:] = 0
+        cv2.drawContours(
+            self._line_mask_buf, [max_line_contour], -1, (255, 255, 255), -1
+        )
 
-
-        mask_msg = bridge.cv2_to_compressed_imgmsg(max_line_mask)
-
-        self.line_mask_pub.publish(mask_msg)
-
-        centerline = self._get_centerline(max_line_mask)
-
+        centerline = self._get_centerline(self._line_mask_buf)
 
         if centerline is None or len(centerline) == 0:
             return None, None
 
-        # by default, pick the node selected via self.followed_node_offset.
+        # by default, pick the node selected via self.centerline_node_offset.
         # However, in case we don't have enough nodes, pick the furthest one.
         # While normally picking the furthest one could lead to turning too quickly,
         # in case of very few nodes (as node offset shouldn't be too high) it's fine.
-        target_idx = min(len(centerline), self.followed_node_offset)
+        target_idx = min(len(centerline), self.centerline_node_offset)
 
-        target_node = centerline[target_idx-1]
+        target_node = centerline[target_idx - 1]
 
-        # self.get_logger().info(f"For offset: {self.followed_node_offset} we pick node: {target_idx} for centerline of length {len(centerline)})")
+        # self.get_logger().info(f"For offset: {self.centerline_node_offset} we pick node: {target_idx} for centerline of length {len(centerline)})")
 
         pixel_error = camera_center[0] - target_node[0]
 
@@ -394,69 +381,32 @@ class GridProcessor(Node):
 
         return centerline, target_node
 
-    def _turning_tracking(self, frame):
+    def _turning_tracking(self, line_bitmask):
         """
-        Sends signals regarding where lines appear/disappear (left, centre, right) side of the image, used to track the turning of the robot
+        Checks if a vertical-enough line is visible in the center ROI.
+        Publishes CENTER when the largest contour's bounding box angle
+        exceeds line_turning_min_angle, NONE otherwise.
         """
 
-
-        line_bitmask = self._get_mask_from_color(img=frame, color=self.line_color)
-
-        rois = {
-            gridbot.LineObservation.LEFT: self.left_roi_mask,
-            gridbot.LineObservation.CENTER: self.center_roi_mask,
-            gridbot.LineObservation.RIGHT: self.right_roi_mask,
-        }
-
-        shares: dict[gridbot.LineObservation, int] = {}
-
-        for region, roi_mask in rois.items():
-            crop = cv2.bitwise_and(line_bitmask, line_bitmask, mask=roi_mask)
-
-            col_has_line = np.count_nonzero(crop, axis=0) > 0
-            row_has_line = np.count_nonzero(crop, axis=1) > 0
-
-            width = np.count_nonzero(col_has_line)
-            height = np.count_nonzero(row_has_line)
-
-            # Ignore shapes that are wider than they are higher (lines going sideways)
-            if width > height:
-                shares[region] = 0
-                continue
-
-            roi_cols = np.where(np.count_nonzero(roi_mask, axis=0) > 0)[0]
-            if roi_cols.size == 0:
-                shares[region] = 0
-                continue
-            roi_left, roi_right = roi_cols[0], roi_cols[-1]
-
-            line_cols = np.where(col_has_line)[0]
-            if line_cols.size == 0:
-                shares[region] = 0
-                continue
-            line_left, line_right = line_cols[0], line_cols[-1]
-
-            # Only count shares which mask is WITHIN the roi (and not outside, or touching the borders) - this prevents premature readings
-            if line_left <= roi_left or line_right >= roi_right:
-                shares[region] = 0
-                continue
-
-            shares[region] = cv2.countNonZero(crop)
-
-        all_line_pixels = sum(shares.values())
+        y0, y1, x0, x1 = self._center_roi
+        roi_slice = line_bitmask[y0:y1, x0:x1]
 
         flags = gridbot.LineObservation.NONE
 
-        if all_line_pixels > 0:
-            for region, share in shares.items():
-                if share / all_line_pixels >= self.line_turning_threshold:
-                    flags |= region
+        contours = self._get_contours(roi_slice)
+        if len(contours) > 0:
+            max_contour = max(contours, key=cv2.contourArea)
+            bx, by, bw, bh = cv2.boundingRect(max_contour)
+            roi_center_x = (x1 - x0) // 2
+            if bw > 0 and by == 0 and bx <= roi_center_x <= bx + bw:
+                angle = np.degrees(np.arctan2(bh, bw))
+                if angle >= self.line_turning_min_angle:
+                    flags = gridbot.LineObservation.CENTER
 
         int_msg = Int8()
         int_msg.data = flags
 
         self.line_turning_pub.publish(int_msg)
-
 
     def _prepare_image_with_trackers(
         self,
@@ -559,24 +509,15 @@ class GridProcessor(Node):
                 )
 
         roi_specs = (
-            (self.left_roi_mask, (0, 0, 255), "Left ROI"),
-            (self.right_roi_mask, (255, 0, 0), "Right ROI"),
-            (self.center_roi_mask, (0, 255, 0), "Center ROI"),
-            (self.aruco_roi_mask, (0, 255, 255), "Aruco ROI"),
+            (self._center_roi, (0, 255, 0), "Center ROI"),
+            (self._aruco_roi, (0, 255, 255), "Aruco ROI"),
         )
 
-        for mask, color, name in roi_specs:
-            ys, xs = np.where(mask > 0)
-            if xs.size == 0 or ys.size == 0:
-                continue
-
-            x_min, x_max = xs.min(), xs.max()
-            y_min, y_max = ys.min(), ys.max()
-
+        for (y0, y1, x0, x1), color, name in roi_specs:
             cv2.rectangle(
                 img=frame,
-                pt1=(x_min, y_min),
-                pt2=(x_max, y_max),
+                pt1=(x0, y0),
+                pt2=(x1, y1),
                 color=color,
                 thickness=2,
             )
@@ -584,7 +525,7 @@ class GridProcessor(Node):
             cv2.putText(
                 img=frame,
                 text=name,
-                org=(x_min + 20, y_min + 40),
+                org=(x0 + 20, y0 + 40),
                 fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                 fontScale=font_scale,
                 color=color,
@@ -592,8 +533,10 @@ class GridProcessor(Node):
                 lineType=cv2.LINE_AA,
             )
 
-        return frame
+        bottom_line_y = self.img_h - self.aruco_padding
+        cv2.line(frame, (0, bottom_line_y), (self.img_w, bottom_line_y), (0, 0, 255), 2)
 
+        return frame
 
     def _quantize_image(self, img: np.ndarray, divider: int):
 
@@ -601,52 +544,40 @@ class GridProcessor(Node):
 
         return frame
 
-    def _prepare_rois(self):
+    def _prepare_roi_limits(self):
         """
-        Prepares ROIs for left, center and right "line tracking areas".
-        Prepares a ROI for ArUco tag searching.
+        Computes ROI bounds (y_start, y_end, x_start, x_end) for line tracking
+        areas and ArUco tag searching. Pre-allocates reusable buffers.
         """
 
-        self.get_logger().info("Setting up ROI masks.")
-        roi_base = np.zeros((self.img_h, self.img_w), dtype=np.uint8)
+        self.get_logger().info("Setting up ROI limits.")
 
         height_px = int(self.img_h * self.line_roi_height)
-        sides_width_px = int(self.img_w * self.sides_line_roi_width)
         center_width_px = int(self.img_w * self.center_line_roi_width)
-
-        (
-            self.left_roi_mask,
-            self.center_roi_mask,
-            self.right_roi_mask,
-            self.aruco_roi_mask,
-        ) = [roi_base.copy() for _ in range(4)]
-
-        self.left_roi_mask[
-            self.img_h - height_px : self.img_h,
-            :sides_width_px,
-        ] = 255
-
-        self.right_roi_mask[
-            self.img_h - height_px : self.img_h,
-            self.img_w - sides_width_px : self.img_w,
-        ] = 255
-
-        self.center_roi_mask[
-            self.img_h - height_px : self.img_h,
-            self.img_w // 2
-            - center_width_px // 2 : self.img_w // 2
-            + center_width_px // 2,
-        ] = 255
 
         aruco_height_px = int(self.img_h * self.aruco_roi_height)
         aruco_width_px = int(self.img_w * self.aruco_roi_width)
 
-        self.aruco_roi_mask[
-            self.img_h - aruco_height_px : self.img_h,
-            self.img_w // 2
-            - aruco_width_px // 2 : self.img_w // 2
-            + aruco_width_px // 2,
-        ] = 255
+        y_top = self.img_h - height_px
+
+        self._center_roi = (
+            y_top,
+            self.img_h,
+            self.img_w // 2 - center_width_px // 2,
+            self.img_w // 2 + center_width_px // 2,
+        )
+        self._aruco_roi = (
+            self.img_h - aruco_height_px,
+            self.img_h,
+            self.img_w // 2 - aruco_width_px // 2,
+            self.img_w // 2 + aruco_width_px // 2,
+        )
+
+        self._color_mask_buf = np.zeros((self.img_h, self.img_w), dtype=np.uint8)
+        self._line_mask_buf = np.zeros((self.img_h, self.img_w, 3), dtype=np.uint8)
+        self._gray_buf = np.zeros((self.img_h, self.img_w), dtype=np.uint8)
+
+        self._color_roi_y_start = y_top
 
         return
 
@@ -676,62 +607,29 @@ class GridProcessor(Node):
 
     def _get_centerline(self, src):
         centerline = []
+        center = self.img_w // 2
 
-
-        for i in range(0, self.img_h - self.midline_step, self.midline_step):
-            row = src[i, :, 0] > 0
-
-            if len(row) == 0:
-                self.get_logger().info(f"Row {row} has no white pixels.")
+        for i in range(0, self.img_h - self.centerline_step, self.centerline_step):
+            nonzero_idx = np.nonzero(src[i, :, 0])[0]
+            if nonzero_idx.size == 0:
                 continue
 
-            # based on https://stackoverflow.com/a/77593930
+            gaps = np.where(np.diff(nonzero_idx) > 1)[0]
 
-            lane_ranges = []
-            inside_lane = False
+            if gaps.size == 0:
+                mid = int((nonzero_idx[0] + nonzero_idx[-1]) // 2)
+            else:
+                starts = np.empty(gaps.size + 1, dtype=nonzero_idx.dtype)
+                ends = np.empty(gaps.size + 1, dtype=nonzero_idx.dtype)
+                starts[0] = nonzero_idx[0]
+                starts[1:] = nonzero_idx[gaps + 1]
+                ends[:-1] = nonzero_idx[gaps]
+                ends[-1] = nonzero_idx[-1]
 
-            bound = []
-            for j, b in enumerate(row):
-                # lane start
-                if b and not inside_lane:
-                    bound.append(j)
-                    inside_lane = True
-                # lane end
-                elif not b and inside_lane:
-                    bound.append(j - 1)
-                    inside_lane = False
-                    lane_ranges.append(tuple(bound))
-                    bound.clear()
-                # edge case - lane bound not closed
-                elif j + 1 == len(row) and inside_lane:
-                    bound.append(j)
-                    lane_ranges.append(tuple(bound))
-                    inside_lane = False
-                    bound.clear()
+                mids = (starts + ends) // 2
+                mid = int(mids[np.argmin(np.abs(mids - center))])
 
-            # in case of multiple lane ranges, pick the one closest to image center
-            center = self.img_w // 2
-            leftmost = None
-            rightmost = None
-            best_range = None
-            min_dist = float("inf")
-
-            for r in lane_ranges:
-                lane_center = (r[0] + r[1]) // 2
-                dist = abs(lane_center - center)
-
-                if dist < min_dist:
-                    min_dist = dist
-                    best_range = r
-
-            if best_range is None:
-                continue
-
-            leftmost = best_range[0]
-            rightmost = best_range[1]
-
-            middle_x = (leftmost + rightmost) // 2
-            centerline.append((middle_x, i))
+            centerline.append((mid, i))
 
         centerline.reverse()
         return centerline
@@ -750,9 +648,7 @@ class GridProcessor(Node):
     def _get_contours(self, src):
         ret, thresh = cv2.threshold(src, 127, 255, 0)
 
-        contours, _ = cv2.findContours(
-            thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
-        )
+        contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
         return contours
 
@@ -777,8 +673,7 @@ class GridProcessor(Node):
         s_high = min(255, self.s_high)
 
         v_low = max(0, self.v_low)
-        v_high = min(255,self.v_high)
-
+        v_high = min(255, self.v_high)
 
         if h_low <= 0 and h_high >= 179:
             # Entire hue spectrum
@@ -849,17 +744,37 @@ class GridProcessor(Node):
         self.get_logger().info(f"Received an update to parameter: {p.name}: {value}")
 
         setattr(self, p.name, value)
-      
+
     def _setup_parameters(self):
         p = partial(gridbot.declare_param, self)
 
         # Topics
-        self.camera_topic = p("camera_topic", "camera/image_raw/compressed", "Topic used to receive camera images (compressed).")
-        self.line_offset_topic = p("line_offset_topic", "line_offset", "Topic used to send line_offset.")
-        self.tracked_image_topic = p("tracked_image_topic", "tracked_image", "Topic used to send images with additional visuals.")
-        self.prepare_tracked_image = p("prepare_tracked_image", False, "Whether to build and publish the tracked image visualization.")
-        self.aruco_topic = p("aruco_topic", "aruco", "Topic used to send aruco ID + direction.")
-        self.line_turning_topic = p("line_turning_topic", "line_turning", "Topic used to send information about turning and line visibility.")
+        self.camera_topic = p(
+            "camera_topic",
+            "camera/image_raw/compressed",
+            "Topic used to receive camera images (compressed).",
+        )
+        self.line_offset_topic = p(
+            "line_offset_topic", "line_offset", "Topic used to send line_offset."
+        )
+        self.tracked_image_topic = p(
+            "tracked_image_topic",
+            "tracked_image",
+            "Topic used to send images with additional visuals.",
+        )
+        self.prepare_tracked_image = p(
+            "prepare_tracked_image",
+            False,
+            "Whether to build and publish the tracked image visualization.",
+        )
+        self.aruco_topic = p(
+            "aruco_topic", "aruco", "Topic used to send aruco ID + direction."
+        )
+        self.line_turning_topic = p(
+            "line_turning_topic",
+            "line_turning",
+            "Topic used to send information about turning and line visibility.",
+        )
 
         line_color = p("line_color", [0, 0, 0], "RGB Color of the line to target.")
         if isinstance(line_color, (list, tuple)):
@@ -870,25 +785,106 @@ class GridProcessor(Node):
             self.line_color = [255, 0, 0]
 
         # ROIs
-        self.line_roi_height = p("line_roi_height", 0.5, "Height of the line search ROI - [0..1] factor.", min_value=0.0, max_value=1.0)
-        self.center_line_roi_width = p("center_line_roi_width", 0.4, "Width of the central line search ROI - [0..1] factor.", min_value=0.0, max_value=1.0)
-        self.sides_line_roi_width = p("sides_line_roi_width", 0.3, "Width of the side line search ROIs - [0..1] factor.", min_value=0.0, max_value=1.0)
-        self.aruco_roi_width = p("aruco_roi_width", 0.5, "Width of the ArUco search ROI - [0..1] factor.", min_value=0.0, max_value=1.0)
-        self.aruco_roi_height = p("aruco_roi_height", 0.5, "Height of the ArUco search ROI - [0..1] factor.", min_value=0.0, max_value=1.0)
-        self.aruco_padding = p("aruco_padding", 5, 'Offset from the bottom of the frame where the node will count a found ArUco code as "Passed by".')
+        self.line_roi_height = p(
+            "line_roi_height",
+            0.5,
+            "Height of the line search ROI - [0..1] factor.",
+            min_value=0.0,
+            max_value=1.0,
+        )
+        self.center_line_roi_width = p(
+            "center_line_roi_width",
+            0.4,
+            "Width of the central line search ROI - [0..1] factor.",
+            min_value=0.0,
+            max_value=1.0,
+        )
+        self.aruco_roi_width = p(
+            "aruco_roi_width",
+            0.5,
+            "Width of the ArUco search ROI - [0..1] factor.",
+            min_value=0.0,
+            max_value=1.0,
+        )
+        self.aruco_roi_height = p(
+            "aruco_roi_height",
+            0.5,
+            "Height of the ArUco search ROI - [0..1] factor.",
+            min_value=0.0,
+            max_value=1.0,
+        )
+        self.aruco_padding = p(
+            "aruco_padding",
+            5,
+            'Offset from the bottom of the frame where the node will count a found ArUco code as "Passed by".',
+        )
 
         # Line tracking
-        self.line_turning_threshold = p("line_turning_threshold", 0.2, "0..1 factor of all of grid line's pixels in a specific ROI to be counted as having a line in it.", min_value=0.0, max_value=1.0)
-        self.midline_step = p("midline_step", 10, "Pixel rows skipped when looking for centerline nodes.", min_value=1, max_value=2**31 - 1)
-        self.followed_node_offset = p("followed_node_offset", 4, "Which node from the bottom will be targeted.", min_value=0, max_value=2**31 - 1)
+        self.line_turning_min_angle = p(
+            "line_turning_min_angle",
+            60.0,
+            "Minimum bounding-box angle (degrees) for a line to count as vertical enough during turning.",
+            min_value=0.0,
+            max_value=90.0,
+        )
+        self.centerline_step = p(
+            "centerline_step",
+            10,
+            "Pixel rows skipped when looking for centerline nodes.",
+            min_value=1,
+            max_value=2**31 - 1,
+        )
+        self.centerline_node_offset = p(
+            "centerline_node_offset",
+            4,
+            "Which node from the bottom will be targeted.",
+            min_value=0,
+            max_value=2**31 - 1,
+        )
 
         # HSV thresholds
-        self.h_thresh_low = p("h_thresh_low", 0, "Lower bound of the hue threshold for line detection.", min_value=0, max_value=179)
-        self.h_thresh_high = p("h_thresh_high", 0, "Upper bound of the hue threshold for line detection.", min_value=0, max_value=179)
-        self.s_low = p("s_low", 0, "Lower bound of the saturation threshold for line detection.", min_value=0, max_value=255)
-        self.s_high = p("s_high", 0, "Upper bound of the saturation threshold for line detection.", min_value=0, max_value=255)
-        self.v_low = p("v_low", 0, "Lower bound of the value threshold for line detection.", min_value=0, max_value=255)
-        self.v_high = p("v_high", 0, "Upper bound of the value threshold for line detection.", min_value=0, max_value=255)
+        self.h_thresh_low = p(
+            "h_thresh_low",
+            0,
+            "Lower bound of the hue threshold for line detection.",
+            min_value=0,
+            max_value=179,
+        )
+        self.h_thresh_high = p(
+            "h_thresh_high",
+            0,
+            "Upper bound of the hue threshold for line detection.",
+            min_value=0,
+            max_value=179,
+        )
+        self.s_low = p(
+            "s_low",
+            0,
+            "Lower bound of the saturation threshold for line detection.",
+            min_value=0,
+            max_value=255,
+        )
+        self.s_high = p(
+            "s_high",
+            0,
+            "Upper bound of the saturation threshold for line detection.",
+            min_value=0,
+            max_value=255,
+        )
+        self.v_low = p(
+            "v_low",
+            0,
+            "Lower bound of the value threshold for line detection.",
+            min_value=0,
+            max_value=255,
+        )
+        self.v_high = p(
+            "v_high",
+            0,
+            "Upper bound of the value threshold for line detection.",
+            min_value=0,
+            max_value=255,
+        )
 
         gridbot.log_params(self)
 

@@ -19,16 +19,15 @@
 
     line_roi_height: 0.6
     center_line_roi_width: 0.2
-    sides_line_roi_width: 0.3
 
-    aruco_roi_width: 0.8
-    aruco_roi_height: 1.0
+    aruco_roi_width: 0.65
+    aruco_roi_height: 0.8
 
-    line_turning_threshold: 0.5
+    line_turning_min_angle: 70.0
 
     aruco_padding: 25
     
-    midline_step: 30
-    followed_node_offset: 4
+    centerline_step: 30
+    centerline_node_offset: 4
 
     prepare_tracked_image: true

@@ -4,8 +4,12 @@ build/
 install/
 log/
 test/
+gridbot/test_results/
+gridbot/scripts/
 
 __pycache__/
 *.py[cod]
 
 *.png
+
+/

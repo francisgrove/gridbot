@@ -1,5 +1,5 @@
 /**:
   ros__parameters:
-    # swap for appropriate map graph if generated
-    graph_filepath: "ros2_ws/src/gridbot/config/map_graph.yaml" 
+    # graph_filepath is set via the 'graph' launch argument. if running the generator manually, set it here.
+    graph_filepath: ""
     turn_penalty_factor: 1.0

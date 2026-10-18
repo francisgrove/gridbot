@@ -16,8 +16,6 @@ def generate_launch_description():
     pkg_name = "gridbot"
     pkg_share = get_package_share_directory(pkg_name)
 
-    motor_driver_config = os.path.join(pkg_share, "config", "motor_driver_params.yaml")
-
     camera_name = "camera"
 
     motors_arg = DeclareLaunchArgument(
@@ -77,6 +75,8 @@ def generate_launch_description():
         composable_node_descriptions=composable_nodes,
     )
 
+    motor_driver_config = os.path.join(pkg_share, "config", "motor_driver_params.yaml")
+
     motor_driver = Node(
         package="gridbot",
         executable="motor_driver",
@@ -85,9 +85,8 @@ def generate_launch_description():
         output="screen",
         parameters=[motor_driver_config],
         condition=IfCondition(LaunchConfiguration("motors")),
-        remappings=[("cmd_vel", "twist_mux/cmd_vel")],  # for twist_mux
     )
-
+    
     camera_controller_config = os.path.join(
         pkg_share,
         "config",
@@ -118,14 +117,17 @@ def generate_launch_description():
         parameters=[distance_measurer_config],
     )
 
-
     return LaunchDescription(
         [
+            # args
             motors_arg,
+            # services
+            camera_controller,
+            distance_measurer,
+            # camera
             camera_node,
             container,
+            # nodes
             motor_driver,
-            camera_controller,
-            distance_measurer
         ]
     )

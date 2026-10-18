@@ -5,23 +5,41 @@ from launch import LaunchDescription
 from launch.actions import (
     IncludeLaunchDescription,
     DeclareLaunchArgument,
+    OpaqueFunction,
 )
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 
 from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 from launch_ros.actions import Node
-from launch.conditions import IfCondition
 
-def generate_launch_description():
+pkg_name = "gridbot"
+pkg_share = get_package_share_directory(pkg_name)
 
-    rosout_level_arg = DeclareLaunchArgument(
-        "rosout_level",
-        default_value="debug",
-        description="Rosout logger severity (error, debug, warn, info)",
-        choices=["error", "warn", "debug", "info"],
+
+def launch_setup(context):
+    graph = LaunchConfiguration("graph").perform(context)
+    graph_filepath = os.path.join(pkg_share, "config", f"{graph}.yaml")
+
+    route_generator_config = os.path.join(
+        pkg_share,
+        "config",
+        "route_generator_params.yaml",
     )
 
-    rosout_level = LaunchConfiguration("rosout_level")
+    route_generator = Node(
+        package="gridbot",
+        executable="route_generator",
+        name="route_generator",
+        namespace=pkg_name,
+        output="screen",
+        parameters=[route_generator_config, {"graph_filepath": graph_filepath}],
+    )
+
+    return [route_generator]
+
+
+def generate_launch_description():
 
     foxglove_arg = DeclareLaunchArgument(
         "foxglove",
@@ -29,8 +47,11 @@ def generate_launch_description():
         description="Launch Foxglove server",
     )
 
-    pkg_name = "gridbot"
-    pkg_share = get_package_share_directory(pkg_name)
+    graph_arg = DeclareLaunchArgument(
+        "graph",
+        default_value="map_graph_8x8",
+        description="Name of the graph config file (without .yaml extension)",
+    )
 
     grid_processor_config = os.path.join(
         pkg_share,
@@ -51,11 +72,6 @@ def generate_launch_description():
         namespace=pkg_name,
         output="screen",
         parameters=[grid_processor_config],
-        arguments=[
-            "--ros-args",
-            "--log-level",
-            [f"{pkg_name}.grid_processor:=", rosout_level],
-        ],
     )
 
     route_navigator = Node(
@@ -65,51 +81,7 @@ def generate_launch_description():
         namespace=pkg_name,
         output="screen",
         parameters=[route_navigator_config],
-        arguments=[
-            "--ros-args",
-            "--log-level",
-            [f"{pkg_name}.route_navigator:=", rosout_level],
-        ],
     )
-
-
-
-    route_generator_config = os.path.join(
-        pkg_share,
-        "config",
-        "route_generator_params.yaml",
-    )
-
-
-
-    route_generator = Node(
-        package="gridbot",
-        executable="route_generator",
-        name="route_generator",
-        namespace=pkg_name,
-        output="screen",
-        parameters=[route_generator_config],
-        arguments=[
-            "--ros-args",
-            "--log-level",
-            [f"{pkg_name}.route_generator:=", rosout_level],
-        ],
-    )
-
-    route_navigator = Node(
-        package="gridbot",
-        executable="route_navigator",
-        name="route_navigator",
-        namespace=pkg_name,
-        output="screen",
-        parameters=[route_navigator_config],
-        arguments=[
-            "--ros-args",
-            "--log-level",
-            [f"{pkg_name}.route_navigator:=", rosout_level],
-        ],
-    )
-
 
     foxglove_pkg_share = get_package_share_directory("foxglove_bridge")
     foxglove_launch_path = os.path.join(
@@ -123,38 +95,17 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("foxglove")),
     )
 
-    
-    twist_mux_config = os.path.join(
-        pkg_share,
-        "config",
-        "twist_mux_params.yaml",
-    )
-
-    twist_mux = Node(
-        package="twist_mux",
-        executable="twist_mux",
-        name="twist_mux",
-        namespace=pkg_name,
-        output="screen",
-        parameters=[twist_mux_config],
-        arguments=[
-            "--ros-args",
-            "--log-level",
-            [f"{pkg_name}.twist_mux:=", rosout_level],
-        ],
-        remappings=[
-            ("cmd_vel_out", "twist_mux/cmd_vel"),
-        ]
-    )
-
     return LaunchDescription(
         [
-            rosout_level_arg,
+            # args
             foxglove_arg,
+            graph_arg,
+            # services
+            OpaqueFunction(function=launch_setup),
+            # nodes
             grid_processor,
             route_navigator,
-            route_generator,
-            twist_mux,
+            # rest
             foxglove_launch,
         ]
     )

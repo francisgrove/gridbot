@@ -1,144 +1,12 @@
 {
   "configById": {
-    "Image!2eiwkud": {
-      "cameraState": {
-        "distance": 20,
-        "perspective": true,
-        "phi": 60,
-        "target": [
-          0,
-          0,
-          0
-        ],
-        "targetOffset": [
-          0,
-          0,
-          0
-        ],
-        "targetOrientation": [
-          0,
-          0,
-          0,
-          1
-        ],
-        "thetaOffset": 60,
-        "fovy": 45,
-        "near": 0.5,
-        "far": 5000
-      },
-      "followMode": "follow-pose",
-      "scene": {},
-      "transforms": {},
-      "topics": {},
-      "layers": {},
-      "publish": {
-        "type": "point",
-        "poseTopic": "/move_base_simple/goal",
-        "pointTopic": "/clicked_point",
-        "poseEstimateTopic": "/initialpose",
-        "poseEstimateXDeviation": 0.5,
-        "poseEstimateYDeviation": 0.5,
-        "poseEstimateThetaDeviation": 0.26179939
-      },
-      "synchronize": false,
-      "imageMode": {
-        "imageTopic": "/gridbot/camera/image_rect/compressed",
-        "rotation": 0,
-        "rectifyImage": true
-      }
-    },
-    "Image!366bh99": {
-      "cameraState": {
-        "distance": 20,
-        "perspective": true,
-        "phi": 60,
-        "target": [
-          0,
-          0,
-          0
-        ],
-        "targetOffset": [
-          0,
-          0,
-          0
-        ],
-        "targetOrientation": [
-          0,
-          0,
-          0,
-          1
-        ],
-        "thetaOffset": 60,
-        "fovy": 45,
-        "near": 0.5,
-        "far": 5000
-      },
-      "followMode": "follow-pose",
-      "scene": {},
-      "transforms": {},
-      "topics": {},
-      "layers": {},
-      "publish": {
-        "type": "point",
-        "poseTopic": "/move_base_simple/goal",
-        "pointTopic": "/clicked_point",
-        "poseEstimateTopic": "/initialpose",
-        "poseEstimateXDeviation": 0.5,
-        "poseEstimateYDeviation": 0.5,
-        "poseEstimateThetaDeviation": 0.26179939
-      },
-      "synchronize": false,
-      "imageMode": {
-        "imageTopic": "/gridbot/camera/image_tracked/compressed"
-      }
-    },
-    "Image!3cargo9": {
-      "cameraState": {
-        "distance": 20,
-        "perspective": true,
-        "phi": 60,
-        "target": [
-          0,
-          0,
-          0
-        ],
-        "targetOffset": [
-          0,
-          0,
-          0
-        ],
-        "targetOrientation": [
-          0,
-          0,
-          0,
-          1
-        ],
-        "thetaOffset": 60,
-        "fovy": 45,
-        "near": 0.5,
-        "far": 5000
-      },
-      "followMode": "follow-pose",
-      "scene": {},
-      "transforms": {},
-      "topics": {},
-      "layers": {},
-      "publish": {
-        "type": "point",
-        "poseTopic": "/move_base_simple/goal",
-        "pointTopic": "/clicked_point",
-        "poseEstimateTopic": "/initialpose",
-        "poseEstimateXDeviation": 0.5,
-        "poseEstimateYDeviation": 0.5,
-        "poseEstimateThetaDeviation": 0.26179939
-      },
-      "synchronize": false,
-      "imageMode": {
-        "imageTopic": "/gridbot/camera/line_mask"
-      }
+    "RawMessages!7u27k0": {
+      "defaultExpanded": false,
+      "topicPath": "/gridbot/navigator_vel_out",
+      "diffEnabled": false
     },
     "Teleop!20fcqpt": {
-      "topic": "/gridbot/cmd_vel",
+      "topic": "/gridbot/navigator_vel_out",
       "publishRate": 1,
       "autoSendStopOnRelease": true,
       "upButton": {
@@ -163,13 +31,209 @@
       }
     },
     "Publish!40gdbjs": {
-      "value": "{\n  \"data\": \"B2\"\n}\n",
+      "value": "{\n  \"data\": \"B4\"\n}\n",
       "topicName": "/gridbot/user_cmd",
       "datatype": "std_msgs/msg/String",
-      "foxglovePanelTitle": "User path command publisher"
+      "foxglovePanelTitle": "Send route"
+    },
+    "Publish!53qvb1": {
+      "value": "{\n  \"data\": \"STOP\"\n}\n",
+      "topicName": "/gridbot/user_cmd",
+      "datatype": "std_msgs/msg/String",
+      "foxglovePanelTitle": "Stop robot"
+    },
+    "RosOut!gdfkej": {
+      "minLogLevel": 1,
+      "searchTerms": [],
+      "nameFilter": {
+        "foxglove_bridge": {
+          "visible": false
+        },
+        "road_follower.robot_state_publisher": {
+          "visible": false
+        },
+        "road_follower.camera_compressor": {
+          "visible": false
+        },
+        "road_follower.ros_gz_bridge": {
+          "visible": false
+        },
+        "road_follower.grid_processor": {
+          "visible": false
+        },
+        "road_follower.path_navigator": {
+          "visible": true
+        },
+        "road_follower.joint_state_publisher": {
+          "visible": false
+        },
+        "road_follower.ros_gz_sim": {
+          "visible": false
+        },
+        "gridbot.grid_processor": {
+          "visible": false
+        },
+        "gridbot.ros_gz_bridge": {
+          "visible": false
+        },
+        "gridbot.robot_state_publisher": {
+          "visible": false
+        },
+        "gridbot.map_generator": {
+          "visible": false
+        },
+        "gridbot.joint_state_publisher": {
+          "visible": false
+        },
+        "gridbot.ros_gz_sim": {
+          "visible": false
+        },
+        "gridbot.camera_compressor": {
+          "visible": false
+        },
+        "gridbot.camera": {
+          "visible": false
+        },
+        "gridbot.motor_driver": {
+          "visible": false
+        },
+        "gridbot.rectify_node": {
+          "visible": false
+        },
+        "gridbot.route_navigator": {
+          "visible": false
+        },
+        "gridbot.image_proc_container": {
+          "visible": false
+        },
+        "gridbot.crop_decimate_node": {
+          "visible": false
+        },
+        "gridbot.route_generator": {
+          "visible": true
+        },
+        "gridbot.camera_controller": {
+          "visible": false
+        },
+        "gridbot.twist_mux": {
+          "visible": false
+        },
+        "gridbot.distance_measurer": {
+          "visible": false
+        },
+        "gridbot.test_evaluator": {
+          "visible": false
+        },
+        "rosbag2_recorder": {
+          "visible": false
+        }
+      },
+      "fontSize": 12,
+      "showLevel": true,
+      "showDate": false,
+      "showTime": false,
+      "showTimezone": false,
+      "showName": false,
+      "showSourceLocation": false,
+      "foxglovePanelTitle": "Route Generator Log"
+    },
+    "RosOut!2b2oqhy": {
+      "minLogLevel": 1,
+      "searchTerms": [],
+      "nameFilter": {
+        "foxglove_bridge": {
+          "visible": false
+        },
+        "road_follower.robot_state_publisher": {
+          "visible": false
+        },
+        "road_follower.camera_compressor": {
+          "visible": false
+        },
+        "road_follower.ros_gz_bridge": {
+          "visible": false
+        },
+        "road_follower.grid_processor": {
+          "visible": false
+        },
+        "road_follower.path_navigator": {
+          "visible": true
+        },
+        "road_follower.joint_state_publisher": {
+          "visible": false
+        },
+        "road_follower.ros_gz_sim": {
+          "visible": false
+        },
+        "gridbot.grid_processor": {
+          "visible": false
+        },
+        "gridbot.ros_gz_bridge": {
+          "visible": false
+        },
+        "gridbot.robot_state_publisher": {
+          "visible": false
+        },
+        "gridbot.map_generator": {
+          "visible": false
+        },
+        "gridbot.joint_state_publisher": {
+          "visible": false
+        },
+        "gridbot.ros_gz_sim": {
+          "visible": false
+        },
+        "gridbot.camera_compressor": {
+          "visible": false
+        },
+        "gridbot.camera": {
+          "visible": false
+        },
+        "gridbot.motor_driver": {
+          "visible": false
+        },
+        "gridbot.rectify_node": {
+          "visible": false
+        },
+        "gridbot.route_navigator": {
+          "visible": true
+        },
+        "gridbot.image_proc_container": {
+          "visible": false
+        },
+        "gridbot.crop_decimate_node": {
+          "visible": false
+        },
+        "gridbot.route_generator": {
+          "visible": false
+        },
+        "gridbot.camera_controller": {
+          "visible": false
+        },
+        "gridbot.twist_mux": {
+          "visible": false
+        },
+        "gridbot.distance_measurer": {
+          "visible": false
+        },
+        "gridbot.test_evaluator": {
+          "visible": false
+        },
+        "rosbag2_recorder": {
+          "visible": false
+        }
+      },
+      "fontSize": 12,
+      "showLevel": true,
+      "showDate": false,
+      "showTime": false,
+      "showTimezone": false,
+      "showName": false,
+      "showSourceLocation": false,
+      "foxglovePanelTitle": "Route Navigator Log"
     },
     "RosOut!1ynjg1g": {
-      "minLogLevel": 2,
+      "minLogLevel": 1,
       "searchTerms": [],
       "nameFilter": {
         "foxglove_bridge": {
@@ -237,6 +301,21 @@
         },
         "gridbot.crop_decimate_node": {
           "visible": false
+        },
+        "gridbot.route_generator": {
+          "visible": false
+        },
+        "map_generator": {
+          "visible": false
+        },
+        "gridbot.camera_controller": {
+          "visible": false
+        },
+        "gridbot.test_evaluator": {
+          "visible": false
+        },
+        "rosbag2_recorder": {
+          "visible": false
         }
       },
       "fontSize": 12,
@@ -249,128 +328,138 @@
       "topicToRender": "/rosout",
       "foxglovePanelTitle": "Grid Processor Log"
     },
-    "RosOut!2pl28co": {
-      "minLogLevel": 2,
-      "searchTerms": [
-        "received"
-      ],
-      "nameFilter": {
-        "foxglove_bridge": {
-          "visible": false
-        },
-        "road_follower.robot_state_publisher": {
-          "visible": false
-        },
-        "road_follower.camera_compressor": {
-          "visible": false
-        },
-        "road_follower.ros_gz_bridge": {
-          "visible": false
-        },
-        "road_follower.grid_processor": {
-          "visible": false
-        },
-        "road_follower.path_navigator": {
-          "visible": true
-        },
-        "road_follower.joint_state_publisher": {
-          "visible": false
-        },
-        "road_follower.ros_gz_sim": {
-          "visible": false
-        },
-        "gridbot.grid_processor": {
-          "visible": false
-        },
-        "gridbot.ros_gz_bridge": {
-          "visible": false
-        },
-        "gridbot.robot_state_publisher": {
-          "visible": false
-        },
-        "gridbot.map_generator": {
-          "visible": false
-        },
-        "gridbot.joint_state_publisher": {
-          "visible": false
-        },
-        "gridbot.ros_gz_sim": {
-          "visible": false
-        },
-        "gridbot.camera_compressor": {
-          "visible": false
-        },
-        "gridbot.camera": {
-          "visible": false
-        },
-        "gridbot.motor_driver": {
-          "visible": false
-        },
-        "gridbot.rectify_node": {
-          "visible": false
-        },
-        "gridbot.route_navigator": {
-          "visible": true
-        },
-        "gridbot.image_proc_container": {
-          "visible": false
-        },
-        "gridbot.crop_decimate_node": {
-          "visible": false
-        }
-      },
-      "fontSize": 12,
-      "showLevel": true,
-      "showDate": false,
-      "showTime": false,
-      "showTimezone": false,
-      "showName": false,
-      "showSourceLocation": false,
-      "foxglovePanelTitle": "Route Navigator Log"
-    },
     "Parameters!2b9656i": {},
-    "Tab!4bh6pf3": {
-      "activeTabIdx": 0,
-      "tabs": [
-        {
-          "layout": {
-            "first": "Image!2eiwkud",
-            "second": {
-              "first": "Image!366bh99",
-              "second": "Image!3cargo9",
-              "direction": "row"
-            },
-            "direction": "column"
-          },
-          "title": "Robot Camera"
-        }
-      ]
+    "Image!2rev8np": {
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 60,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false,
+      "imageMode": {
+        "imageTopic": "/gridbot/camera/image_tracked/compressed"
+      }
+    },
+    "Image!2c6o6qa": {
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 60,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false,
+      "imageMode": {
+        "imageTopic": "/gridbot/map_topdown"
+      },
+      "foxglovePanelTitle": "Top-down Camera (sim only)"
     }
   },
   "layout": {
     "first": {
-      "first": "Teleop!20fcqpt",
-      "second": "Publish!40gdbjs",
-      "direction": "column"
-    },
-    "second": {
-      "direction": "row",
       "first": {
         "first": {
-          "first": "RosOut!1ynjg1g",
-          "second": "RosOut!2pl28co",
-          "direction": "row",
-          "splitPercentage": 39.78313344192347
+          "first": "RawMessages!7u27k0",
+          "second": "Teleop!20fcqpt",
+          "direction": "column"
+        },
+        "second": {
+          "first": "Publish!40gdbjs",
+          "second": "Publish!53qvb1",
+          "direction": "column"
+        },
+        "direction": "column"
+      },
+      "second": {
+        "first": {
+          "first": {
+            "first": "RosOut!gdfkej",
+            "second": "RosOut!2b2oqhy",
+            "direction": "row"
+          },
+          "second": "RosOut!1ynjg1g",
+          "direction": "column"
         },
         "second": "Parameters!2b9656i",
         "direction": "column",
         "splitPercentage": 96.39344536418848
       },
-      "second": "Tab!4bh6pf3",
-      "splitPercentage": 60.175680844677096
+      "direction": "row",
+      "splitPercentage": 30.992643331117698
+    },
+    "second": {
+      "first": "Image!2rev8np",
+      "second": "Image!2c6o6qa",
+      "direction": "column"
     },
     "direction": "row",
-    "splitPercentage": 18.476494388341706
+    "splitPercentage": 60.648918469217975
   },
   "globalVariables": {},
   "playbackConfig": {

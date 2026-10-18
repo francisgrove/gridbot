@@ -54,6 +54,8 @@ class RouteNavigator(Node):
     angular_vel: float
 
     pause_start = 0
+    lost_timeout_start = 0
+
 
     graph_width: int = None
     graph_height: int = None
@@ -245,7 +247,6 @@ class RouteNavigator(Node):
 
         flags = gridbot.LineObservation(msg.data)
 
-
         if self.last_line_observation is None:
             self.last_line_observation = flags
             return
@@ -382,6 +383,9 @@ class RouteNavigator(Node):
 
         self.twist_pub.publish(twist_msg)
 
+
+
+
 # =================== PARAM SETUP ===================
     def setup_parameters(self):
         p = partial(gridbot.declare_param, self)
@@ -404,7 +408,6 @@ class RouteNavigator(Node):
         # Timing
         self.timer_period = p("timer_period", 0.005, "Timer period of the robot's state machine.", min_value=0.0)
         self.pause_duration = p("pause_duration", 1.0, "Duration (in seconds) to pause the robot for after reaching a node/turning correctly.", min_value=0.0)
-        self.lost_timeout = p("lost_timeout", 5.0, "Time (in seconds) after the robot will be considered lost (counting starts when line turning retrieves [0 0 0].", min_value=0.0)
 
         # PID
         self.pid = PID(
@@ -416,6 +419,7 @@ class RouteNavigator(Node):
         # Velocities
         self.linear_vel = p("linear_vel", 0.15, "Normalized forward speed (0..1).", min_value=0.0, max_value=1.0)
         self.angular_vel = p("angular_vel", 0.3, "Normalized turning speed (0..1).", min_value=0.0, max_value=1.0)
+        
 
         gridbot.log_params(self)
 

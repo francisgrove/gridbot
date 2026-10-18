@@ -4,18 +4,15 @@
     aruco_topic: "aruco"
     line_turning_topic: "line_turning"
     user_cmd_topic: "user_cmd"
-    twist_topic: "navigator_vel_out"
+    twist_topic: "navigator_vel"
 
     dims_service: "route_generator/get_dims"
     route_service: "route_generator/generate_route"
-
-    map_graph_filepath: "config/map_graph.yaml"
 
     start_pos: "A1"
     start_dir: "north"
 
     pause_duration: 1.0
-    lost_timeout: 5.0
 
     timer_period: 0.005
     k_p: 2.0

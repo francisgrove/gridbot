@@ -14,10 +14,11 @@ def package_files(directory):
     return paths
 
 
-models = []
-for file in package_files("assets"):
-    dest = os.path.join("share", package_name, os.path.dirname(file))
-    models.append((dest, [file]))
+assets = []
+for directory in ["assets/worlds", "assets/models"]:
+    for file in package_files(directory):
+        dest = os.path.join("share", package_name, os.path.dirname(file))
+        assets.append((dest, [file]))
 
 
 setup(
@@ -39,12 +40,8 @@ setup(
             os.path.join("share", package_name, "config"),
             glob(os.path.join("config", "*")),
         ),
-        (
-            os.path.join("share", package_name, "assets/worlds"),
-            glob(os.path.join("assets/worlds", "*")),
-        ),
     ]
-    + models,
+    + assets,
     install_requires=["setuptools", "gpiozero", "opencv-python"],
     zip_safe=True,
     maintainer="Francis",
@@ -59,12 +56,14 @@ setup(
     entry_points={
         "console_scripts": [
             "grid_processor = gridbot.grid_processor:main",
+            "grid_processor_debug = gridbot.grid_processor_debug:main",
             "route_navigator = gridbot.route_navigator:main",
             "motor_driver = gridbot.motor_driver:main",
             "map_generator = gridbot.service_map_generator:main",
             "route_generator = gridbot.service_route_generator:main",
             "camera_controller = gridbot.service_camera_controller:main",
             "distance_measurer = gridbot.distance_measurer:main",
+            "test_evaluator = gridbot.test_evaluator:main",
         ],
     },
 )

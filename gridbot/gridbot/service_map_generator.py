@@ -55,22 +55,25 @@ class MapGenerator(Node):
 
     # ============ PARAMS AND FIELDS ============
 
+    MARKER_RAW_SIZE = 6  # assuming 4x4 markers
+    DOTS_PER_CM = 118.11 # equivalent of 300 dpi
+
+
     yaml_save_path: str
     map_img_save_path: str
-    markers_imgs_save_path: str
+    markers_print_path: str
 
     map_name: str
 
-    tag_size: int
+    marker_scale: int
     text_size: int
-    img_width: int
-    img_height: int
+    image_length: int
 
     line_color: tuple[int, int, int]
-    line_length: int
+    marker_distance: int
     line_thickness: int
 
-    padding: int
+    border_padding: int
     text_padding: int
 
     graph_width: int
@@ -104,21 +107,21 @@ class MapGenerator(Node):
 
         overwrite: bool = request.overwrite
 
+        markers_dir = Path(self.markers_print_path, self.map_name)
+
         if not overwrite:
             if Path(self.yaml_save_path, self.map_name + ".yaml").exists():
-                response.success = False    
+                response.success = False
                 response.msg = f"map graph of name '{self.map_name}' already exists in {self.yaml_save_path}/{self.map_name}.yaml. To overwrite it, set the request's 'overwrite' param to true."
                 return response
             elif Path(self.map_img_save_path, self.map_name + ".png").exists():
                 response.success = False
                 response.msg = f"map image of name '{self.map_name}' already exists in {self.map_img_save_path}/{self.map_name}.png. To overwrite it, set the request's 'overwrite' param to true."
                 return response
-
-            for file in Path(self.markers_imgs_save_path).glob(".png"):
-                if file.name.endswith(self.map_name+".png"):
-                    response.success = False
-                    response.msg = f"Marker prefixed with '{file.name}' already exists in {self.map_img_save_path}/{file.name}. To overwrite it, set the request's 'overwrite' param to true."
-                    return response
+            elif markers_dir.exists() and any(markers_dir.glob("*.png")):
+                response.success = False
+                response.msg = f"Marker images already exist in {markers_dir}. To overwrite them, set the request's 'overwrite' param to true."
+                return response
 
         self._add_nodes()
         self._remove_nodes()
@@ -126,8 +129,24 @@ class MapGenerator(Node):
 
         graph = self._generate_graph()
 
+        marker_px = self.MARKER_RAW_SIZE * self.marker_scale
+        internal_dim = max(
+            (self.graph_width - 1) * (marker_px + self.marker_distance) + marker_px,
+            (self.graph_height - 1) * (marker_px + self.marker_distance) + marker_px,
+        )
+        upscale = (self.image_length - 2 * self.border_padding) / internal_dim
+        marker_final_px = marker_px * upscale
+        model_base_size = 2.0
+        marker_m_at_scale1 = marker_final_px * model_base_size / self.image_length
+        sim_scale = (self.marker_desired_cm / 100.0) / marker_m_at_scale1
+
+
         yaml_contents = dict(
-            graph_width=self.graph_width, graph_height=self.graph_height, graph=graph
+            graph_width=self.graph_width,
+            graph_height=self.graph_height,
+            sim_scale=round(sim_scale, 4),
+            marker_scale=self.marker_scale,
+            graph=graph,
         )
 
         yaml_path = str(Path(self.yaml_save_path, self.map_name + ".yaml"))
@@ -142,17 +161,23 @@ class MapGenerator(Node):
 
         map_img, markers = self._generate_image()
 
-        map_path = str(Path(self.map_img_save_path, self.map_name+".png"))
+        map_path = str(Path(self.map_img_save_path, self.map_name + ".png"))
 
         success = cv2.imwrite(map_path, map_img)
 
         if not success:
             response.success = False
-            response.msg = f"Error saving map image to {self.img_save_path}."
+            response.msg = f"Error saving map image to {map_path}."
             return response
 
+        if markers_dir.exists():
+            for old_file in markers_dir.iterdir():
+                old_file.unlink()
+        else:
+            markers_dir.mkdir(parents=True)
+
         for name, image in markers.items():
-            marker_path = str(Path(self.markers_imgs_save_path, name))
+            marker_path = str(markers_dir / name)
             success = cv2.imwrite(marker_path, image)
 
             if not success:
@@ -161,20 +186,26 @@ class MapGenerator(Node):
                 return response
 
         response.success = True
-        response.msg = f"Successfully created {self.map_name}'s map graph, map image and marker images."
+        response.msg = (
+            f"Successfully created {self.map_name}'s map graph, map image and marker images. "
+            f"---------Set the scale of the grid in your world to:---------: "
+            f"<scale>{sim_scale:.4f} {sim_scale:.4f} 1</scale>"
+        )
         return response
 
     # =========== HELPER METHODS ===========
 
     def _add_nodes(self):
+        marker_px = self.MARKER_RAW_SIZE * self.marker_scale
+
         for y in range(self.graph_height):
             for x in range(self.graph_width):
 
                 tag_id = x * self.graph_height + y
 
-                tag_x = self.tag_size // 2 + x * (self.tag_size + self.line_length)
+                tag_x = marker_px // 2 + x * (marker_px + self.marker_distance)
 
-                tag_y = self.tag_size // 2 + y * (self.tag_size + self.line_length)
+                tag_y = marker_px // 2 + y * (marker_px + self.marker_distance)
 
                 map_node = self._MapNode(
                     x=tag_x,
@@ -265,16 +296,12 @@ class MapGenerator(Node):
         Generate the graph image.
         """
 
-        node_xs = [node.x for node in self.node_map]
-        node_ys = [node.y for node in self.node_map]
+        marker_px = self.MARKER_RAW_SIZE * self.marker_scale
 
-        min_x = min(node_xs)
-        max_x = max(node_xs)
-        min_y = min(node_ys)
-        max_y = max(node_ys)
-
-        width = (max_x - min_x) + self.tag_size
-        height = (max_y - min_y) + self.tag_size
+        width = (self.graph_width - 1) * (marker_px + self.marker_distance) + marker_px
+        height = (self.graph_height - 1) * (
+            marker_px + self.marker_distance
+        ) + marker_px
 
         image = np.full(
             (height, width, 3),
@@ -309,45 +336,30 @@ class MapGenerator(Node):
                     cv2.LINE_4,
                 )
 
-                y_turn = -1 if from_y == min_y else 1
-                x_turn = -1 if from_x == min_x else 1
+        scale = (self.image_length - 2 * self.border_padding) / max(width, height)
 
-                text_x_offset = x_turn * self.text_padding if from_x == to_x else 0
-                text_y_offset = y_turn * self.text_padding if from_y == to_y else 0
+        scaled_width = round(width * scale)
+        scaled_height = round(height * scale)
 
-                text_x = (from_x + to_x) // 2 - text_x_offset
-                text_y = (from_y + to_y) // 2 - text_y_offset
 
-                text_scale = cv2.getFontScaleFromHeight(
-                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    pixelHeight=self.text_size,
-                    thickness=self.text_size,
-                )
-
-                self.get_logger().info(f"calculated text size: {text_scale}")
-
-                cv2.putText(
-                    image,
-                    str(edge.weight),
-                    (text_x, text_y),
-                    cv2.FONT_HERSHEY_DUPLEX,
-                    text_scale,
-                    (0, 0, 0),
-                    1,
-                    cv2.LINE_AA,
-                    False,
-                )
+        print_marker_px = round(self.marker_desired_cm * self.DOTS_PER_CM)
 
         for node in self.node_map:
 
             marker = cv2.aruco.generateImageMarker(
                 self.aruco_dict,
                 node.tag_id,
-                self.tag_size,
+                marker_px,
+            )
+
+            print_marker = cv2.aruco.generateImageMarker(
+                self.aruco_dict,
+                node.tag_id,
+                print_marker_px,
             )
 
             marker_name = node.label + "_" + self.map_name + ".png"
-            markers[marker_name] = marker
+            markers[marker_name] = print_marker
 
             marker = cv2.cvtColor(
                 marker,
@@ -357,21 +369,11 @@ class MapGenerator(Node):
             center_x = node.x
             center_y = height - node.y
 
-            x0 = center_x - self.tag_size // 2
-            y0 = center_y - self.tag_size // 2
+            x0 = center_x - marker_px // 2
+            y0 = center_y - marker_px // 2
 
-            x1 = x0 + self.tag_size
-            y1 = y0 + self.tag_size
+            image[y0 : y0 + marker_px, x0 : x0 + marker_px] = marker
 
-            image[y0:y1, x0:x1] = marker
-
-        scale = min(
-            (self.img_width - 2 * self.padding) / width,
-            (self.img_height - 2 * self.padding) / height,
-        )
-
-        scaled_width = round(width * scale)
-        scaled_height = round(height * scale)
 
         image = cv2.resize(
             image,
@@ -380,23 +382,76 @@ class MapGenerator(Node):
         )
 
         final_image = np.full(
-            (self.img_height, self.img_width, 3),
+            (self.image_length, self.image_length, 3),
             255,
             dtype=np.uint8,
         )
 
         x_offset = (
-            self.padding + (self.img_width - 2 * self.padding - scaled_width) // 2
+            self.border_padding
+            + (self.image_length - 2 * self.border_padding - scaled_width) // 2
         )
 
         y_offset = (
-            self.padding + (self.img_height - 2 * self.padding - scaled_height) // 2
+            self.border_padding
+            + (self.image_length - 2 * self.border_padding - scaled_height) // 2
         )
 
         final_image[
             y_offset : y_offset + scaled_height,
             x_offset : x_offset + scaled_width,
         ] = image
+
+        min_x = marker_px // 2
+        min_y = marker_px // 2
+
+        text_scale = cv2.getFontScaleFromHeight(
+            fontFace=cv2.FONT_HERSHEY_DUPLEX,
+            pixelHeight=round(self.text_size * scale),
+            thickness=round(self.text_size * scale),
+        )
+
+        for node_from, edges in self.node_map.items():
+            for edge in edges:
+
+                node_to = next(
+                    (node for node in self.node_map if node.label == edge.to),
+                    None,
+                )
+
+                if node_to is None:
+                    continue
+
+                from_x = round(node_from.x * scale) + x_offset
+                from_y = round((height - node_from.y) * scale) + y_offset
+
+                to_x = round(node_to.x * scale) + x_offset
+                to_y = round((height - node_to.y) * scale) + y_offset
+
+                y_turn = -1 if node_from.y == (height - min_y) else 1
+                x_turn = -1 if node_from.x == min_x else 1
+
+                text_x_offset = (
+                    round(x_turn * self.text_padding) if from_x == to_x else 0
+                )
+                text_y_offset = (
+                    round(y_turn * self.text_padding) if from_y == to_y else 0
+                )
+
+                text_x = (from_x + to_x) // 2 - text_x_offset
+                text_y = (from_y + to_y) // 2 - text_y_offset
+
+                cv2.putText(
+                    final_image,
+                    str(edge.weight),
+                    (text_x, text_y),
+                    cv2.FONT_HERSHEY_DUPLEX,
+                    text_scale,
+                    (0, 0, 0),
+                    1,
+                    cv2.LINE_AA,
+                    False,
+                )
 
         self.get_logger().info(
             f"Generated map: {self.graph_width}*{self.graph_height}, {self.removed_nodes}"
@@ -421,15 +476,51 @@ class MapGenerator(Node):
         p = partial(gridbot.declare_param, self)
 
         # Save paths
-        self.yaml_save_path = p("yaml_save_path", "config/", "Save path of the map yaml file. Relative to the package.")
-        self.map_img_save_path = p("map_img_save_path", "assets/", "Save path of the generated map image.")
-        self.markers_imgs_save_path = p("markers_imgs_save_path", "assets/", "Save path of the generated marker images, useful for printing.")
+        self.yaml_save_path = p(
+            "yaml_save_path",
+            "config/",
+            "Save path of the map yaml file. Relative to the package.",
+        )
+        self.map_img_save_path = p(
+            "map_img_save_path", "assets/", "Save path of the generated map image."
+        )
+        self.markers_print_path = p(
+            "markers_print_path",
+            "assets/",
+            "Save path of the generated marker images, useful for printing.",
+        )
 
         # Image parameters
-        self.img_width = p("img_width", 2048, "Width of generated image in pixels.", min_value=1, max_value=8192)
-        self.img_height = p("img_height", 2048, "Height of generated image in pixels.", min_value=1, max_value=8192)
-        self.tag_size = p("tag_size", 30, "Size of the ArUco tag in pixels.", min_value=1, max_value=2048)
-        self.text_size = p("text_size", 25, "Size of edge weight text in pixels.", min_value=0, max_value=2048)
+        self.image_length = p(
+            "image_length",
+            4096,
+            "Side length of the square output image in pixels.",
+            min_value=1,
+            max_value=8192,
+        )
+        self.marker_scale = p(
+            "marker_scale",
+            10,
+            "Scale multiplier for the ArUco marker.",
+            min_value=1,
+            max_value=200,
+        )
+        self.text_size = p(
+            "text_size",
+            25,
+            "Size of edge weight text in final image pixels.",
+            min_value=0,
+            max_value=2048,
+        )
+
+        self.marker_desired_cm = p(
+            "marker_desired_cm",
+            8.5,
+            "Desired size of markers in cm, used to rescale the sim model and prints.",
+            min_value=0.0,
+            max_value=100.0,
+        )
+
 
         line_color = p("line_color", [255, 0, 0], "RGB color of graph lines.")
         if len(line_color) != 3:
@@ -441,17 +532,61 @@ class MapGenerator(Node):
 
         self.line_color = line_color
 
-        self.line_length = p("line_length", 100, "Length of lines between nodes in pixels.", min_value=1, max_value=4096)
-        self.padding = p("padding", 8, "Padding of a tag from the image border in pixels.", min_value=0, max_value=2048)
-        self.text_padding = p("text_padding", 8, "Padding of weight text from its line in pixels.", min_value=0, max_value=2048)
-        self.line_thickness = p("line_thickness", 8, "Thickness of graph lines in pixels.", min_value=1, max_value=100)
+        self.marker_distance = p(
+            "marker_distance",
+            20,
+            "Distance between markers in internal pixels.",
+            min_value=1,
+            max_value=4096,
+        )
+        self.border_padding = p(
+            "border_padding",
+            200,
+            "Padding from the image border in final image pixels.",
+            min_value=0,
+            max_value=2048,
+        )
+        self.text_padding = p(
+            "text_padding",
+            25,
+            "Padding of weight text from its edge in final image pixels.",
+            min_value=0,
+            max_value=2048,
+        )
+        self.line_thickness = p(
+            "line_thickness",
+            4,
+            "Thickness of graph lines in internal pixels.",
+            min_value=1,
+            max_value=100,
+        )
 
         # Graph parameters
-        self.graph_width = p("graph_width", 6, "Number of columns in the graph.", min_value=1, max_value=26)
-        self.graph_height = p("graph_height", 5, "Number of rows in the graph.", min_value=1, max_value=26)
-        self.removed_nodes = p("removed_nodes", Parameter.Type.STRING_ARRAY, "List of disabled nodes in the graph.")
-        self.edges = p("edges", Parameter.Type.STRING_ARRAY, "Graph edges formatted as FROM,TO,WEIGHT. Example: A1,B1,7")
-        self.use_weights = p("use_weights", False, "Whether to use weights provided in edges, or to calculate them from node positions.")
+        self.graph_width = p(
+            "graph_width",
+            6,
+            "Number of columns in the graph.",
+            min_value=1,
+            max_value=26,
+        )
+        self.graph_height = p(
+            "graph_height", 5, "Number of rows in the graph.", min_value=1, max_value=26
+        )
+        self.removed_nodes = p(
+            "removed_nodes",
+            Parameter.Type.STRING_ARRAY,
+            "List of disabled nodes in the graph.",
+        )
+        self.edges = p(
+            "edges",
+            Parameter.Type.STRING_ARRAY,
+            "Graph edges formatted as FROM,TO,WEIGHT. Example: A1,B1,7",
+        )
+        self.use_weights = p(
+            "use_weights",
+            False,
+            "Whether to use weights provided in edges, or to calculate them from node positions.",
+        )
 
         gridbot.log_params(self)
 

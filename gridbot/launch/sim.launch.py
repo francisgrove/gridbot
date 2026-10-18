@@ -7,6 +7,7 @@ from launch.actions import (
     IncludeLaunchDescription,
     SetEnvironmentVariable,
     DeclareLaunchArgument,
+    OpaqueFunction,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
@@ -14,13 +15,35 @@ from launch_ros.actions import Node
 from launch.substitutions import LaunchConfiguration
 from launch.conditions import IfCondition, UnlessCondition
 
+pkg_name = "gridbot"
+pkg_share = get_package_share_directory(pkg_name)
+
+
+def launch_setup(context):
+    graph = LaunchConfiguration("graph").perform(context)
+    graph_filepath = os.path.join(pkg_share, "config", f"{graph}.yaml")
+
+    route_generator_config = os.path.join(
+        pkg_share,
+        "config",
+        "route_generator_params.yaml",
+    )
+
+    route_generator = Node(
+        package="gridbot",
+        executable="route_generator",
+        name="route_generator",
+        namespace=pkg_name,
+        output="screen",
+        parameters=[route_generator_config, {"graph_filepath": graph_filepath}],
+    )
+
+    return [route_generator]
+
 
 def generate_launch_description():
-    pkg_name = "gridbot"
-    pkg_share = get_package_share_directory(pkg_name)
-
     robot_xacro = os.path.join(pkg_share, "description", "robot.urdf.xacro")
-    robot_description = xacro.process_file(robot_xacro).toxml()  # type: ignore
+    robot_description = xacro.process_file(robot_xacro).toxml()
 
     world_path = os.path.join(pkg_share, "assets/worlds", "world.sdf")
 
@@ -35,20 +58,16 @@ def generate_launch_description():
         description="Launch Gazebo GUI",
     )
 
-    rosout_level_arg = DeclareLaunchArgument(
-        "rosout_level",
-        default_value="debug",
-        description="Rosout logger severity (error, debug, warn, info)",
-        choices=["error", "warn", "debug", "info"],
-    )
-
     foxglove_arg = DeclareLaunchArgument(
         "foxglove",
         default_value="true",
         description="Launch Foxglove server",
     )
 
-    rosout_level = LaunchConfiguration("rosout_level")
+    graph_arg = DeclareLaunchArgument(
+        "graph",
+        description="Name of the graph config file (without .yaml extension), e.g. map_graph_8x8",
+    )
 
     gazebo_launch_path = os.path.join(
         get_package_share_directory("ros_gz_sim"),
@@ -107,9 +126,9 @@ def generate_launch_description():
             "-name",
             "road_bot",
             "-x",
-            "-0.72",
+            "-1.35",
             "-y",
-            "0.87",
+            "1.37",
             "-z",
             "0.15",
             "-R",
@@ -127,30 +146,6 @@ def generate_launch_description():
         pkg_share,
         "config",
         "ros_gz_bridge_params.yaml",
-    )
-
-    map_generator_config = os.path.join(
-        pkg_share,
-        "config",
-        "map_generator_params.yaml",
-    )
-
-    grid_processor_config = os.path.join(
-        pkg_share,
-        "config",
-        "grid_processor_params.yaml",
-    )
-
-    route_generator_config = os.path.join(
-        pkg_share,
-        "config",
-        "route_generator_params.yaml",
-    )
-
-    route_navigator_config = os.path.join(
-        pkg_share,
-        "config",
-        "route_navigator_params.yaml",
     )
 
     ros_gz_bridge = Node(
@@ -174,18 +169,11 @@ def generate_launch_description():
         output="screen",
     )
 
-    map_generator = Node(
-        package="gridbot",
-        executable="map_generator",
-        name="map_generator",
-        namespace=pkg_name,
-        output="screen",
-        parameters=[map_generator_config],
-        arguments=[
-            "--ros-args",
-            "--log-level",
-            [f"{pkg_name}.map_generator:=", rosout_level],
-        ],
+
+    grid_processor_config = os.path.join(
+        pkg_share,
+        "config",
+        "grid_processor_params.yaml",
     )
 
     grid_processor = Node(
@@ -195,25 +183,12 @@ def generate_launch_description():
         namespace=pkg_name,
         output="screen",
         parameters=[grid_processor_config],
-        arguments=[
-            "--ros-args",
-            "--log-level",
-            [f"{pkg_name}.grid_processor:=", rosout_level],
-        ],
     )
 
-    route_generator = Node(
-        package="gridbot",
-        executable="route_generator",
-        name="route_generator",
-        namespace=pkg_name,
-        output="screen",
-        parameters=[route_generator_config],
-        arguments=[
-            "--ros-args",
-            "--log-level",
-            [f"{pkg_name}.route_generator:=", rosout_level],
-        ],
+    route_navigator_config = os.path.join(
+        pkg_share,
+        "config",
+        "route_navigator_params.yaml",
     )
 
     route_navigator = Node(
@@ -223,31 +198,6 @@ def generate_launch_description():
         namespace=pkg_name,
         output="screen",
         parameters=[route_navigator_config],
-        arguments=[
-            "--ros-args",
-            "--log-level",
-            [f"{pkg_name}.route_navigator:=", rosout_level],
-        ],
-    )
-
-    twist_mux_config = os.path.join(
-        pkg_share,
-        "config",
-        "twist_mux_params.yaml",
-    )
-
-    twist_mux = Node(
-        package="twist_mux",
-        executable="twist_mux",
-        name="twist_mux",
-        namespace=pkg_name,
-        output="screen",
-        parameters=[twist_mux_config],
-        arguments=[
-            "--ros-args",
-            "--log-level",
-            [f"{pkg_name}.twist_mux:=", rosout_level],
-        ],
     )
 
     foxglove_pkg_share = get_package_share_directory("foxglove_bridge")
@@ -264,22 +214,26 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            map_generator,
-            route_generator,
+            # args
             gui_arg,
-            rosout_level_arg,
             foxglove_arg,
+            graph_arg,
             set_gz_model_path,
-            gazebo_gui,
+            # services
+            OpaqueFunction(function=launch_setup),
+            # gazebo
             gazebo_headless,
-            camera_compressor,
+            gazebo_gui,
+            # states
             robot_state_pub,
             joint_state_pub,
-            ros_gz_bridge,
             spawn_robot,
+            ros_gz_bridge,
+            # nodes
             grid_processor,
             route_navigator,
-            # twist_mux,
+            # rest
+            camera_compressor,
             foxglove_launch,
         ]
     )
