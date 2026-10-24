@@ -3,3 +3,5 @@
     # graph_filepath is set via the 'graph' launch argument. if running the generator manually, set it here.
     graph_filepath: ""
     turn_penalty_factor: 1.0
+    route_service_name: "generate_route"
+    dims_service_name: "get_dims"

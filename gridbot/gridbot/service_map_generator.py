@@ -96,7 +96,7 @@ class MapGenerator(Node):
         self._setup_parameters()
 
         self.service = self.create_service(
-            GenerateMap, node_name + "/generate_map", self.generate_map_callback
+            GenerateMap, self.map_service_name, self.generate_map_callback
         )
 
     # ============== CALLBACK ==============
@@ -489,6 +489,9 @@ class MapGenerator(Node):
             "assets/",
             "Save path of the generated marker images, useful for printing.",
         )
+
+        self.map_service_name = p("map_service_name", "generate_map", "Name of the service used to generate the map.")
+
 
         # Image parameters
         self.image_length = p(

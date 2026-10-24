@@ -160,15 +160,13 @@ def generate_launch_description():
         package="image_transport",
         executable="republish",
         name="camera_compressor",
-        namespace=pkg_name,
-        arguments=["raw", "compressed"],
+        parameters=[{"in_transport": "raw", "out_transport": "compressed"}],
         remappings=[
-            ("in", "camera/image_raw"),
-            ("out/compressed", "camera/image_rect/compressed"),
+            ("in", f"/{pkg_name}/camera/image_raw"),
+            ("out/compressed", f"/{pkg_name}/camera/image_raw/compressed"),
         ],
         output="screen",
     )
-
 
     grid_processor_config = os.path.join(
         pkg_share,

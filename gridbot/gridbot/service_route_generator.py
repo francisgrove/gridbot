@@ -1,3 +1,4 @@
+from functools import partial
 import math
 
 import rclpy
@@ -24,28 +25,56 @@ class RouteGenerator(Node):
     def __init__(self, node_name):
         super().__init__(node_name)
 
-        graph_path = gridbot.declare_param(
-            self,
+        self._setup_parameters()
+        self._load_graph()
+
+        self.route_service = self.create_service(
+            GenerateRoute, self.route_service_name, self.generate_route_callback
+        )
+
+        self.dims_service = self.create_service(
+            GetDims, self.dims_service_name, self.get_dims_callback
+        )
+
+        gridbot.log_params(self)
+        self.get_logger().info("Graph Loaded successfully")
+
+    def _setup_parameters(self):
+        p = partial(gridbot.declare_param, self)
+
+        self.graph_path = p(
             "graph_filepath",
             "",
             "Filepath of the map graph yaml file. It contains the adjacency map as well as the map's dimensions.",
         )
 
-        self.turn_penalty_factor = gridbot.declare_param(
-            self,
+        self.turn_penalty_factor = p(
             "turn_penalty_factor",
             1.0,
             "Factor [0.0, 1.0] for turn penalty. 0.0 disables turn penalty.",
+            min_value=0.0,
         )
 
-        with open(graph_path) as f:
-            try:
+        self.route_service_name = p(
+            "route_service_name",
+            "generate_route",
+            "Name of the service used to generate the route.",
+        )
 
+        self.dims_service_name = p(
+            "dims_service_name",
+            "get_dims",
+            "Name of the service used to get the map dimensions.",
+        )
+
+    def _load_graph(self):
+        with open(self.graph_path) as f:
+            try:
                 load = yaml.safe_load(f)
 
                 if load is None:
                     self.get_logger().error(
-                        f"Given graph file '{graph_path}' is empty."
+                        f"Given graph file '{self.graph_path}' is empty."
                     )
 
                 self.graph = load["graph"]
@@ -59,16 +88,6 @@ class RouteGenerator(Node):
 
             except yaml.YAMLError as e:
                 self.get_logger().error(str(e))
-
-        self.route_service = self.create_service(
-            GenerateRoute, f"{node_name}/generate_route", self.generate_route_callback
-        )
-
-        self.dims_service = self.create_service(
-            GetDims, f"{node_name}/get_dims", self.get_dims_callback
-        )
-
-        self.get_logger().info("Graph Loaded successfully")
 
     def get_dims_callback(self, request, response):
         response.graph_width = self.graph_width

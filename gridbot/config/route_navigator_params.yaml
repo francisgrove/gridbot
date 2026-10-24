@@ -6,8 +6,8 @@
     user_cmd_topic: "user_cmd"
     twist_topic: "navigator_vel"
 
-    dims_service: "route_generator/get_dims"
-    route_service: "route_generator/generate_route"
+    dims_service: "get_dims"
+    route_service: "generate_route"
 
     start_pos: "A1"
     start_dir: "north"

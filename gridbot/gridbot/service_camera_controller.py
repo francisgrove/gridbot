@@ -74,7 +74,7 @@ class CameraController(Node):
         self._setup_parameters()
 
         self.service = self.create_service(
-            AngleCamera, node_name + "/set_angles", self.center_camera_callback
+            AngleCamera, self.controller_service_name, self.center_camera_callback
         )
 
 
@@ -104,6 +104,8 @@ class CameraController(Node):
         self.button_pin = p("button_pin", 7, "GPIO pin of the button used for centering.")
         self.default_pan_angle = p("default_pan_angle", 90, "Default pan angle for the camera arm.")
         self.default_tilt_angle = p("default_tilt_angle", 90, "Default tilt angle for the camera arm.")
+
+        self.controller_service_name = p("controller_service_name", "set_angles", "Name of the service used to set the angles of the camera arm.")
 
     def destroy_node(self):
         self.controller.close()

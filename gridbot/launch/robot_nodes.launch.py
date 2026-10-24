@@ -6,8 +6,7 @@ from launch.actions import (
     DeclareLaunchArgument,
 )
 from ament_index_python.packages import get_package_share_directory
-from launch_ros.actions import Node, ComposableNodeContainer
-from launch_ros.descriptions import ComposableNode
+from launch_ros.actions import Node
 from launch.substitutions import LaunchConfiguration
 from launch.conditions import IfCondition
 
@@ -15,8 +14,6 @@ from launch.conditions import IfCondition
 def generate_launch_description():
     pkg_name = "gridbot"
     pkg_share = get_package_share_directory(pkg_name)
-
-    camera_name = "camera"
 
     motors_arg = DeclareLaunchArgument(
         "motors",
@@ -27,52 +24,13 @@ def generate_launch_description():
     camera_node = Node(
         package="camera_ros",
         executable="camera_node",
-        name=camera_name,
+        name="camera",
         parameters=[{"orientation": 180, "width": 640, "height": 480}],
         namespace=pkg_name,
         remappings=[
-            ("image_raw", "image_raw"),
+            ("image_raw", "cam_image_raw"),
             ("camera_info", "camera_info"),
         ],
-    )
-
-    composable_nodes = [
-        ComposableNode(
-            package="image_proc",
-            plugin="image_proc::RectifyNode",
-            name="rectify_node",
-            namespace=pkg_name,
-            remappings=[
-                ("image", f"{camera_name}/image_raw"),
-                ("image_rect", f"{camera_name}/image_rect"),
-            ],
-        ),
-        ComposableNode(
-            package="image_proc",
-            plugin="image_proc::CropDecimateNode",
-            name="crop_decimate_node",
-            namespace=pkg_name,
-            remappings=[
-                ("in/image_raw", f"{camera_name}/image_rect"),
-                ("in/camera_info", f"{camera_name}/camera_info"),
-                ("out/image_raw", f"{camera_name}/image_downsized"),
-                ("out/camera_info", f"{camera_name}/downsized_camera_info"),
-            ],
-            parameters=[
-                {
-                    "decimation_x": 2,
-                    "decimation_y": 2,
-                }
-            ],
-        ),
-    ]
-
-    container = ComposableNodeContainer(
-        name="image_proc_container",
-        package="rclcpp_components",
-        executable="component_container",
-        namespace=pkg_name,
-        composable_node_descriptions=composable_nodes,
     )
 
     motor_driver_config = os.path.join(pkg_share, "config", "motor_driver_params.yaml")
@@ -126,7 +84,6 @@ def generate_launch_description():
             distance_measurer,
             # camera
             camera_node,
-            container,
             # nodes
             motor_driver,
         ]
