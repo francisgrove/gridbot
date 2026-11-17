@@ -63,7 +63,7 @@ setup(
             "route_generator = gridbot.service_route_generator:main",
             "camera_controller = gridbot.service_camera_controller:main",
             "distance_measurer = gridbot.distance_measurer:main",
-            "test_evaluator = gridbot.test_evaluator:main",
+            "route_evaluator = gridbot.route_evaluator:main",
         ],
     },
 )

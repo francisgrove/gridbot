@@ -28,7 +28,7 @@
           <geometry>
             <mesh>
               <uri>model://grid/grid.obj</uri>
-              <scale>1.5543 1.5543 1</scale>
+              <scale>0.9263 0.9263 1</scale>
             </mesh>
           </geometry>
         </visual>
@@ -36,7 +36,7 @@
           <geometry>
             <mesh>
               <uri>model://grid/grid.obj</uri>
-              <scale>1.5543 1.5543 1</scale>
+              <scale>0.9263 0.9263 1</scale>
             </mesh>
           </geometry>
         </collision>

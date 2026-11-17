@@ -10,13 +10,14 @@
     right_forward_pin: 20
     right_backward_pin: 21
 
-    wheel_radius: 0.021
-    wheel_separation: 0.08382
+    left_wheel_mult: 1.0
+    right_wheel_mult: 1.0
+
+    frequency: 150.0
+
+    # wheel_radius: 0.021
+    # wheel_separation: 0.08382
 
     vel_multiplier: 0.5
-
-    ramp_down_duration: 0.5
-
-    frequency: 1000.0
 
     invert_direction: true

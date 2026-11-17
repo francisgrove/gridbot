@@ -1,6 +1,6 @@
 /**:
   ros__parameters:
-    camera_topic: "camera/image_raw/compressed"
+    camera_topic: "camera/image_raw"
     line_offset_topic: "line_offset"
     tracked_image_topic: "camera/image_tracked/compressed"
     aruco_topic: "aruco"
@@ -8,24 +8,24 @@
 
     quantize_div: 64
 
-    line_color: [193,0,0]
+    line_color_hsv: [0, 255, 193]
 
-    h_thresh_low: 25
-    h_thresh_high: 25
-    s_low: 150
-    s_high: 255
-    v_low: 50
-    v_high: 220
+    h_low: 25
+    h_high: 25
+    s_low: 100
+    s_high: 100
+    v_low: 100
+    v_high: 100
 
     line_roi_height: 0.6
-    center_line_roi_width: 0.2
+    centerline_roi_width: 0.2
 
     aruco_roi_width: 0.65
     aruco_roi_height: 0.8
 
-    line_turning_min_angle: 70.0
+    line_turning_min_angle: 50.0
 
-    aruco_padding: 25
+    aruco_padding: 35
     
     centerline_step: 30
     centerline_node_offset: 4

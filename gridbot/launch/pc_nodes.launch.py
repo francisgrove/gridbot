@@ -131,7 +131,7 @@ def generate_launch_description():
         output="screen",
         parameters=[grid_processor_config],
         remappings=[
-            ("image_raw/compressed", "image_downsized/compressed")
+            ("image_raw", "image_downsized")
         ]
     )
 

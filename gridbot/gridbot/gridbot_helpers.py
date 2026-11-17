@@ -25,16 +25,12 @@ class RobotDirection(Enum):
     TURN_RIGHT = 2
 
 
-class LineObservation(IntFlag):
+class LineObservation(Enum):
     """
     Possible appearances of the line during turning of the robot.
     """
-
     NONE = 0
-    CENTER = auto()
-    LEFT = auto()
-    RIGHT = auto()
-
+    CENTER = 1
 
 class ArucoDirection(Enum):
     """
@@ -130,8 +126,12 @@ def declare_param(
         if isinstance(default, float):
             descriptor.floating_point_range = [
                 FloatingPointRange(
-                    from_value=float(min_value) if min_value is not None else -float("inf"),
-                    to_value=float(max_value) if max_value is not None else float("inf"),
+                    from_value=(
+                        float(min_value) if min_value is not None else -float("inf")
+                    ),
+                    to_value=(
+                        float(max_value) if max_value is not None else float("inf")
+                    ),
                 )
             ]
         elif isinstance(default, int) and not isinstance(default, bool):

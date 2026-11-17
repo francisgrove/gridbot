@@ -2,7 +2,7 @@ from functools import partial
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import CompressedImage
+from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import Float64, Int8
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
@@ -13,8 +13,6 @@ from rclpy.parameter_event_handler import ParameterEventHandler
 from gridbot_interfaces.msg import SimpleAruco
 
 import numpy as np
-import colorsys
-
 import cv2
 from cv_bridge import CvBridge
 
@@ -29,9 +27,9 @@ class GridProcessor(Node):
     prepare_tracked_image: bool
     aruco_topic: str
     line_turning_topic: str
-    line_color: list
+    line_color_hsv: list
     line_roi_height: float
-    center_line_roi_width: int
+    centerline_roi_width: int
 
     aruco_roi_width: int
     aruco_roi_height: float
@@ -54,18 +52,19 @@ class GridProcessor(Node):
     _aruco_roi: tuple = None
 
     _is_tracking_marker: bool = False
-    _lost_top_edge: bool = False
+    _lost_marker_top_points: bool = False
+    _turning_line_exited: bool = False
     _old_points = None
     _old_gray = None
 
     last_found_aruco: int
     last_found_direction: gridbot.ArucoDirection
 
-    h_thresh_low: int = 0
+    h_low: int = 0
     s_low: int = 0
     v_low: int = 0
 
-    h_thresh_high: int = 0
+    h_high: int = 0
     s_high: int = 0
     v_high: int = 0
 
@@ -88,6 +87,7 @@ class GridProcessor(Node):
         aruco_params.cornerRefinementMaxIterations = 40
 
         self.detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
+
         self.last_found_aruco = -1
         self.last_found_direction = None
 
@@ -105,7 +105,7 @@ class GridProcessor(Node):
         )
 
         self.camera_sub = self.create_subscription(
-            CompressedImage, self.camera_topic, self.image_callback, qos_profile=qos
+            Image, self.camera_topic, self.image_callback, qos_profile=qos
         )
         self.line_offset_pub = self.create_publisher(
             Float64, self.line_offset_topic, qos_profile=qos
@@ -135,7 +135,7 @@ class GridProcessor(Node):
             "h_thresh_high",
             "s_high",
             "v_high",
-            "line_color",
+            "line_color_hsv",
         ):
             self._handler.add_parameter_callback(
                 parameter_name=parameter_name,
@@ -143,10 +143,8 @@ class GridProcessor(Node):
                 callback=self.hsv_parameter_callback,
             )
 
-    def image_callback(self, msg: CompressedImage):
-        frame_raw = bridge.compressed_imgmsg_to_cv2(
-            cmprs_img_msg=msg, desired_encoding="bgr8"
-        )
+    def image_callback(self, msg: Image):
+        frame_raw = bridge.imgmsg_to_cv2(img_msg=msg, desired_encoding="bgr8")
 
         if frame_raw is None:
             self.get_logger().error("Error while trying to read frame.")
@@ -159,12 +157,13 @@ class GridProcessor(Node):
             self.img_h = h
             self._prepare_roi_limits()
 
-        upper_edge, top_edge, direction = None, None, None
-        upper_edge, top_edge, direction = self._aruco_tracking(frame_raw)
+        camera_top_points, marker_top_points, direction = None, None, None
+        camera_top_points, marker_top_points, direction = self._aruco_tracking(frame_raw)
 
         self._color_mask_buf[:] = 0
         color_crop = frame_raw[self._color_roi_y_start :]
-        crop_mask = self._get_mask_from_color(img=color_crop, color=self.line_color)
+
+        crop_mask = self._get_mask_from_color(img=color_crop, color_hsv=self.line_color_hsv)
         self._color_mask_buf[self._color_roi_y_start :] = crop_mask
 
         centerline, target_node = self._line_tracking(self._color_mask_buf)
@@ -172,7 +171,7 @@ class GridProcessor(Node):
 
         if self.prepare_tracked_image:
             tracked_image = self._prepare_image_with_trackers(
-                frame_raw, upper_edge, top_edge, direction, centerline, target_node, 1.5
+                frame_raw, camera_top_points, marker_top_points, direction, centerline, target_node, 1.5
             )
 
             tracked_image_msg = bridge.cv2_to_compressed_imgmsg(cvim=tracked_image)
@@ -234,27 +233,27 @@ class GridProcessor(Node):
                     self.get_logger().debug(f"Point {p} below Y={bottom_line}.")
                     st[i] = 2
 
-            upper_edge_new = new_points[:2]
-            top_edge_new = new_points[2:]
+            camera_top_points_new = new_points[:2]
+            marker_top_points_new = new_points[2:]
 
-            upper_st = st[:2]
-            top_st = st[2:]
+            camera_st = st[:2]
+            marker_st = st[2:]
 
-            top_edge_good = top_edge_new[top_st == 1]
+            marker_top_points_good = marker_top_points_new[marker_st == 1]
 
             direction = self.last_found_direction
 
-            if any(top_st != 1):
-                if not self._lost_top_edge:
-                    self._lost_top_edge = True
+            if any(marker_st != 1):
+                if not self._lost_marker_top_points:
+                    self._lost_marker_top_points = True
                     self.get_logger().info(
                         f"Lost top edge for tag={self.last_found_aruco}. "
                         f"Direction from last known: {self.last_found_direction.name.capitalize()}."
                     )
             else:
-                self._lost_top_edge = False
+                self._lost_marker_top_points = False
                 direction = self._calculate_aruco_direction(
-                    top_edge_good.reshape(-1, 2)
+                    marker_top_points_good.reshape(-1, 2)
                 )
                 if direction != self.last_found_direction:
                     self.get_logger().info(
@@ -262,7 +261,7 @@ class GridProcessor(Node):
                     )
                     self.last_found_direction = direction
 
-            if any(upper_st == 0):
+            if any(camera_st == 0):
                 self.get_logger().info(
                     f"Lost upper edge for tag={self.last_found_aruco}. Returning to detection..."
                 )
@@ -270,7 +269,7 @@ class GridProcessor(Node):
                 return None, None, None
 
             # At least one point passed the line - publish, since we're likely on the point
-            elif any(upper_st == 2):
+            elif any(camera_st == 2):
                 self.get_logger().info(
                     f"Marker {self.last_found_aruco} passed bottom of the screen at Y={bottom_line}. Publishing:..."
                 )
@@ -286,11 +285,11 @@ class GridProcessor(Node):
                 self.last_found_aruco = -1
                 self._old_gray = None
                 self._old_points = None
-                return upper_edge_new, top_edge_new, direction
+                return camera_top_points_new, marker_top_points_new, direction
 
             self._old_gray = gray_crop.copy()
             self._old_points = new_points.reshape(-1, 1, 2).astype(np.float32)
-            return upper_edge_new, top_edge_new, direction
+            return camera_top_points_new, marker_top_points_new, direction
 
         # ==================== DETECTING MODE ====================
         else:
@@ -317,16 +316,16 @@ class GridProcessor(Node):
                 sorted(largest_corners, key=lambda c: c[1])[:2], key=lambda c: c[0]
             )
 
-            top_edge = largest_corners[:2]
+            marker_top_points = largest_corners[:2]
 
             self.last_found_aruco = largest_id
-            self.last_found_direction = self._calculate_aruco_direction(top_edge)
+            self.last_found_direction = self._calculate_aruco_direction(marker_top_points)
             self._old_gray = gray_crop.copy()
             self._old_points = np.array(
-                np.append(upper_points, top_edge), dtype=np.float32
+                np.append(upper_points, marker_top_points), dtype=np.float32
             ).reshape(-1, 1, 2)
             self._is_tracking_marker = True
-            self._lost_top_edge = False
+            self._lost_marker_top_points = False
             return None, None, None
 
     def _line_tracking(self, line_bitmask: np.array):
@@ -391,28 +390,40 @@ class GridProcessor(Node):
         y0, y1, x0, x1 = self._center_roi
         roi_slice = line_bitmask[y0:y1, x0:x1]
 
-        flags = gridbot.LineObservation.NONE
+        line_obs = gridbot.LineObservation.NONE
 
         contours = self._get_contours(roi_slice)
         if len(contours) > 0:
+
             max_contour = max(contours, key=cv2.contourArea)
             bx, by, bw, bh = cv2.boundingRect(max_contour)
-            roi_center_x = (x1 - x0) // 2
-            if bw > 0 and by == 0 and bx <= roi_center_x <= bx + bw:
-                angle = np.degrees(np.arctan2(bh, bw))
-                if angle >= self.line_turning_min_angle:
-                    flags = gridbot.LineObservation.CENTER
+            roi_w = x1 - x0
+            roi_center_x = roi_w // 2
+            fifth_start = 2 * roi_w // 5
+            fifth_end = 3 * roi_w // 5
+
+            in_fifth = bw > 0 and by == 0 and bx < fifth_end and bx + bw > fifth_start
+
+            if not in_fifth:
+                self._turning_line_exited = True
+
+            if in_fifth and self._turning_line_exited:
+                if bx <= roi_center_x <= bx + bw:
+                    angle = np.degrees(np.arctan2(bh, bw))
+                    if angle >= self.line_turning_min_angle:
+                        line_obs = gridbot.LineObservation.CENTER
+                        self._turning_line_exited = False
 
         int_msg = Int8()
-        int_msg.data = flags
+        int_msg.data = line_obs.value
 
         self.line_turning_pub.publish(int_msg)
 
     def _prepare_image_with_trackers(
         self,
         frame,
-        upper_edge,
-        top_edge,
+        camera_top_points,
+        marker_top_points,
         direction: gridbot.ArucoDirection,
         centerline,
         target_node,
@@ -448,10 +459,10 @@ class GridProcessor(Node):
                         thickness=2,
                     )
 
-        if direction is not None and upper_edge is not None and top_edge is not None:
+        if direction is not None and camera_top_points is not None and marker_top_points is not None:
 
-            upper_pts = np.array(upper_edge, dtype=np.int32).reshape(-1, 2)
-            top_pts = np.array(top_edge, dtype=np.int32).reshape(-1, 2)
+            upper_pts = np.array(camera_top_points, dtype=np.int32).reshape(-1, 2)
+            top_pts = np.array(marker_top_points, dtype=np.int32).reshape(-1, 2)
 
             center = upper_pts.mean(axis=0)
 
@@ -547,13 +558,13 @@ class GridProcessor(Node):
     def _prepare_roi_limits(self):
         """
         Computes ROI bounds (y_start, y_end, x_start, x_end) for line tracking
-        areas and ArUco tag searching. Pre-allocates reusable buffers.
+        areas and ArUco tag searching.
         """
 
         self.get_logger().info("Setting up ROI limits.")
 
         height_px = int(self.img_h * self.line_roi_height)
-        center_width_px = int(self.img_w * self.center_line_roi_width)
+        center_width_px = int(self.img_w * self.centerline_roi_width)
 
         aruco_height_px = int(self.img_h * self.aruco_roi_height)
         aruco_width_px = int(self.img_w * self.aruco_roi_width)
@@ -652,51 +663,44 @@ class GridProcessor(Node):
 
         return contours
 
-    def _get_mask_from_color(self, img, color):
+    def _get_mask_from_color(self, img, color_hsv):
         img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-        # color is RGB
-        color_h, color_s, color_v = colorsys.rgb_to_hsv(
-            r=color[0] / 255.0,
-            g=color[1] / 255.0,
-            b=color[2] / 255.0,
-        )
+        hue = color_hsv[0]
+        sat = color_hsv[1]
+        val = color_hsv[2]
 
-        color_h = round(color_h * 179)
-        color_s = round(color_s * 255)
-        color_v = round(color_v * 255)
+        h_lower = hue - self.h_low
+        h_upper = hue + self.h_high
 
-        h_low = color_h - self.h_thresh_low
-        h_high = color_h + self.h_thresh_high
+        s_lower = max(0, sat - self.s_low)
+        s_upper = min(255, sat + self.s_high)
 
-        s_low = max(0, self.s_low)
-        s_high = min(255, self.s_high)
+        v_lower = max(0, val - self.v_low)
+        v_upper = min(255, val + self.v_high)
 
-        v_low = max(0, self.v_low)
-        v_high = min(255, self.v_high)
-
-        if h_low <= 0 and h_high >= 179:
+        if h_lower <= 0 and h_upper >= 179:
             # Entire hue spectrum
-            lower = np.array([0, s_low, v_low])
-            upper = np.array([179, s_high, v_high])
+            lower = np.array([0, s_lower, v_lower])
+            upper = np.array([179, s_upper, v_upper])
 
             self.get_logger().debug(
-                f"HSV mask | ALL H | S {s_low}:{s_high} | V {v_low}:{v_high}"
+                f"HSV mask | ALL H | S {s_lower}:{s_upper} | V {v_lower}:{v_upper}"
             )
 
             mask = cv2.inRange(img_hsv, lower, upper)
 
-        elif h_low < 0:
+        elif h_lower < 0:
             # Wraps through 0
-            lower_1 = np.array([0, s_low, v_low])
-            upper_1 = np.array([h_high, s_high, v_high])
+            lower_1 = np.array([0, s_lower, v_lower])
+            upper_1 = np.array([h_upper, s_upper, v_upper])
 
-            lower_2 = np.array([180 + h_low, s_low, v_low])
-            upper_2 = np.array([179, s_high, v_high])
+            lower_2 = np.array([180 + h_lower, s_lower, v_lower])
+            upper_2 = np.array([179, s_upper, v_upper])
 
             self.get_logger().debug(
-                f"HSV mask | H {180 + h_low}:179 + 0:{h_high} | "
-                f"S {s_low}:{s_high} | V {v_low}:{v_high}"
+                f"HSV mask | H {180 + h_lower}:179 + 0:{h_upper} | "
+                f"S {s_lower}:{s_upper} | V {v_lower}:{v_upper}"
             )
 
             mask1 = cv2.inRange(img_hsv, lower_1, upper_1)
@@ -704,17 +708,17 @@ class GridProcessor(Node):
 
             mask = cv2.bitwise_or(mask1, mask2)
 
-        elif h_high > 179:
+        elif h_upper > 179:
             # Wraps through 179 -> 0
-            lower_1 = np.array([h_low, s_low, v_low])
-            upper_1 = np.array([179, s_high, v_high])
+            lower_1 = np.array([h_lower, s_lower, v_lower])
+            upper_1 = np.array([179, s_upper, v_upper])
 
-            lower_2 = np.array([0, s_low, v_low])
-            upper_2 = np.array([h_high - 180, s_high, v_high])
+            lower_2 = np.array([0, s_lower, v_lower])
+            upper_2 = np.array([h_upper - 180, s_upper, v_upper])
 
             self.get_logger().debug(
-                f"HSV mask | H {h_low}:179 + 0:{h_high - 180} | "
-                f"S {s_low}:{s_high} | V {v_low}:{v_high}"
+                f"HSV mask | H {h_lower}:179 + 0:{h_upper - 180} | "
+                f"S {s_lower}:{s_upper} | V {v_lower}:{v_upper}"
             )
 
             mask1 = cv2.inRange(img_hsv, lower_1, upper_1)
@@ -724,12 +728,12 @@ class GridProcessor(Node):
 
         else:
             # Normal, non-wrapping range
-            lower = np.array([h_low, s_low, v_low])
-            upper = np.array([h_high, s_high, v_high])
+            lower = np.array([h_lower, s_lower, v_lower])
+            upper = np.array([h_upper, s_upper, v_upper])
 
             self.get_logger().debug(
-                f"HSV mask | H {h_low}:{h_high} | "
-                f"S {s_low}:{s_high} | V {v_low}:{v_high}"
+                f"HSV mask | H {h_lower}:{h_upper} | "
+                f"S {s_lower}:{s_upper} | V {v_lower}:{v_upper}"
             )
 
             mask = cv2.inRange(img_hsv, lower, upper)
@@ -751,8 +755,8 @@ class GridProcessor(Node):
         # Topics
         self.camera_topic = p(
             "camera_topic",
-            "camera/image_raw/compressed",
-            "Topic used to receive camera images (compressed).",
+            "camera/image_raw",
+            "Topic used to receive camera images.",
         )
         self.line_offset_topic = p(
             "line_offset_topic", "line_offset", "Topic used to send line_offset."
@@ -776,13 +780,20 @@ class GridProcessor(Node):
             "Topic used to send information about turning and line visibility.",
         )
 
-        line_color = p("line_color", [0, 0, 0], "RGB Color of the line to target.")
-        if isinstance(line_color, (list, tuple)):
-            self.line_color = [
-                int(np.clip(c, 0, 255)) for c in (list(line_color) + [0, 0, 0])[:3]
+        line_color_hsv = p(
+            "line_color_hsv",
+            [0, 0, 0],
+            "HSV color of the line to target (OpenCV scale: H 0-179, S 0-255, V 0-255).",
+        )
+        if isinstance(line_color_hsv, (list, tuple)):
+            hsv = (list(line_color_hsv) + [0, 0, 0])[:3]
+            self.line_color_hsv = [
+                int(np.clip(hsv[0], 0, 179)),
+                int(np.clip(hsv[1], 0, 255)),
+                int(np.clip(hsv[2], 0, 255)),
             ]
         else:
-            self.line_color = [255, 0, 0]
+            self.line_color_hsv = [0, 255, 255]
 
         # ROIs
         self.line_roi_height = p(
@@ -792,8 +803,8 @@ class GridProcessor(Node):
             min_value=0.0,
             max_value=1.0,
         )
-        self.center_line_roi_width = p(
-            "center_line_roi_width",
+        self.centerline_roi_width = p(
+            "centerline_roi_width",
             0.4,
             "Width of the central line search ROI - [0..1] factor.",
             min_value=0.0,
@@ -843,14 +854,14 @@ class GridProcessor(Node):
         )
 
         # HSV thresholds
-        self.h_thresh_low = p(
+        self.h_low = p(
             "h_thresh_low",
             0,
             "Lower bound of the hue threshold for line detection.",
             min_value=0,
             max_value=179,
         )
-        self.h_thresh_high = p(
+        self.h_high = p(
             "h_thresh_high",
             0,
             "Upper bound of the hue threshold for line detection.",

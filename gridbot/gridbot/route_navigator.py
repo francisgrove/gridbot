@@ -9,7 +9,7 @@ from geometry_msgs.msg import Twist
 
 import gridbot.gridbot_helpers as gridbot
 from gridbot_interfaces.srv import GenerateRoute, GetDims
-from gridbot_interfaces.msg import RouteNode, SimpleAruco
+from gridbot_interfaces.msg import RouteNode, SimpleAruco, StampedRoute
 
 
 class PID:
@@ -54,15 +54,14 @@ class RouteNavigator(Node):
     angular_vel: float
 
     pause_start = 0
-    lost_timeout_start = 0
-
 
     graph_width: int = None
     graph_height: int = None
 
-    node_reached: bool
-    last_line_observation: gridbot.LineObservation
+    aruco_reached: bool
+    last_line_obs: gridbot.LineObservation
     center_found: bool
+
     clear_route: bool
 
     def __init__(self, node_name: str):
@@ -76,9 +75,9 @@ class RouteNavigator(Node):
 
         self.curr_state = gridbot.RobotState.IDLE
 
-        self.last_line_observation = None
+        self.last_line_obs = None
         self.clear_route = False
-        self.node_reached = False
+        self.aruco_reached = False
         self.center_found = False
 
         self._dims_pending = False
@@ -121,6 +120,9 @@ class RouteNavigator(Node):
         self.twist_pub = self.create_publisher(
             msg_type=Twist, topic=self.twist_topic, qos_profile=qos
         )
+        self.route_pub = self.create_publisher(
+            msg_type=StampedRoute, topic=self.route_topic, qos_profile=qos
+        )
 
         self.timer = self.create_timer(
             timer_period_sec=self.timer_period, callback=self.timer_callback
@@ -131,8 +133,7 @@ class RouteNavigator(Node):
 
         self.context.on_shutdown(self.cleanup)
 
-
-# =================== DIMS SERVICE ===================
+    # =================== DIMS SERVICE ===================
     def request_dims(self):
         if self.graph_width is not None or self.graph_height is not None:
             return
@@ -144,7 +145,7 @@ class RouteNavigator(Node):
         self._dims_pending = True
         future = self.dims_client.call_async(GetDims.Request())
         future.add_done_callback(self.on_dims_response)
- 
+
     def on_dims_response(self, future):
         self._dims_pending = False
         try:
@@ -160,12 +161,15 @@ class RouteNavigator(Node):
             f"Map dimensions are: {self.graph_width} x {self.graph_height}"
         )
 
-# =================== ROUTE SERVICE ===================
+    # =================== ROUTE SERVICE ===================
     def request_route(self, nodes: list[str], looking_dir: gridbot.ArucoDirection):
 
         if not self.route_client.service_is_ready():
             self.get_logger().info("GenerateRoute service not available.")
             return
+
+        self.robot_route = []
+        self.curr_state = gridbot.RobotState.IDLE
 
         self.route_request = GenerateRoute.Request()
         self.route_request.user_nodes = nodes
@@ -180,11 +184,16 @@ class RouteNavigator(Node):
 
             self.robot_route = result.route
 
+            msg = StampedRoute()
+            msg.stamp = self.get_clock().now().to_msg()
+            msg.route = result.route
+            self.route_pub.publish(msg)
+
         except Exception as e:
             self.get_logger().error(f"GenerateRoute service call failed: {e}")
             return
 
-# =================== CALLBACKS ===================
+    # =================== CALLBACKS ===================
     def user_cmd_callback(self, msg: String):
 
         self.get_logger().info(f"Received user command:\n{msg.data}")
@@ -216,11 +225,14 @@ class RouteNavigator(Node):
             f"Received ArUco data:\n\tTag: {msg_id} -> {received_node}\n\tDirection: {msg_dir} -> {gridbot.ArucoDirection(msg_dir).name.capitalize()}"
         )
 
+        if len(self.robot_route) == 0:
+            return
+
         expected_node = self.robot_route[0].name
 
         if received_node != expected_node:
 
-            self.get_logger().info(f"Expected {expected_node}, but got {received_node}")
+            self.get_logger().info(f"Expected {expected_node}, but received {received_node}")
 
             # obtain all nodes that have priority (were specified by the user)
             priority_nodes = [received_node] + [
@@ -228,6 +240,7 @@ class RouteNavigator(Node):
             ]
 
             self.request_route(nodes=priority_nodes, looking_dir=self.curr_dir)
+            return
 
         node_name = gridbot.aruco_to_node(msg_id, self.graph_height)
         dir_enum = gridbot.ArucoDirection(msg_dir)
@@ -237,7 +250,7 @@ class RouteNavigator(Node):
         if self.curr_dir != dir_enum:
             self.curr_dir = dir_enum
 
-        self.node_reached = True
+        self.aruco_reached = True
         return
 
     def line_turning_callback(self, msg: Int8) -> None:
@@ -245,40 +258,27 @@ class RouteNavigator(Node):
         if self.curr_state != gridbot.RobotState.TURNING:
             return
 
-        flags = gridbot.LineObservation(msg.data)
+        line_obs = gridbot.LineObservation(msg.data)
 
-        if self.last_line_observation is None:
-            self.last_line_observation = flags
+        if self.last_line_obs is None:
+            self.last_line_obs = line_obs
             return
-        elif self.last_line_observation == flags:
+        elif self.last_line_obs == line_obs:
             return
 
-        if flags != self.last_line_observation and self.last_line_observation is not None:        
-            self.get_logger().info(
-                f"Road flags:\n [{int(bool(flags & gridbot.LineObservation.LEFT))} "
-                f"{int(bool(flags & gridbot.LineObservation.CENTER))} "
-                f"{int(bool(flags & gridbot.LineObservation.RIGHT))}]"
-            )
+        self.get_logger().info(f"Road line in center: {line_obs}")
 
+        was_center = self.last_line_obs is gridbot.LineObservation.CENTER
+        is_center = line_obs is gridbot.LineObservation.CENTER
 
-        curr_center = flags & gridbot.LineObservation.CENTER
-
-        if (
-            not curr_center
-            and self.last_line_observation & gridbot.LineObservation.CENTER
-        ):
+        if was_center and not is_center:
             self.center_found = False
-
-        # Only count a line being found if previously the line wasn't in the center
-        if (
-            curr_center
-            and not self.last_line_observation & gridbot.LineObservation.CENTER
-        ):
+        if not was_center and is_center:
             self.center_found = True
 
-        self.last_line_observation = flags
+        self.last_line_obs = line_obs
 
-# =================== PUBLISHER CALLBACK ===================
+    # =================== PUBLISHER CALLBACK ===================
 
     def timer_callback(self):
         twist_msg = Twist()
@@ -314,6 +314,11 @@ class RouteNavigator(Node):
                     self.get_logger().error(f"Direction {next_dir} not supported.")
 
         if next_state is not None and self.curr_state != next_state:
+            if next_state == gridbot.RobotState.MOVING:
+                self.aruco_reached = False
+            elif next_state == gridbot.RobotState.TURNING:
+                self.center_found = False
+                self.last_line_obs = None
             self.curr_state = next_state
             self.get_logger().info(
                 f"Robot state set to: {self.curr_state.name.capitalize()}"
@@ -325,12 +330,13 @@ class RouteNavigator(Node):
                 twist_msg.linear.x = float(self.linear_vel)
                 twist_msg.angular.z = float(self.angular_vel * self.pid_output)
 
-                if self.node_reached:
+                if self.aruco_reached:
                     self.get_logger().info(f"Node {self.curr_pos} reached.")
-                    self.node_reached = False
+                    self.aruco_reached = False
                     self.curr_state = gridbot.RobotState.PAUSED
                     self.pause_start = self.get_clock().now().nanoseconds
             case gridbot.RobotState.TURNING:
+
                 twist_msg.linear.x = 0.0
 
                 turn_dir = (
@@ -383,43 +389,107 @@ class RouteNavigator(Node):
 
         self.twist_pub.publish(twist_msg)
 
-
-
-
-# =================== PARAM SETUP ===================
+    # =================== PARAM SETUP ===================
     def setup_parameters(self):
         p = partial(gridbot.declare_param, self)
 
         # Topics / services
-        self.line_offset_topic = p("line_offset_topic", "line_offset", "Topic used to receive line_offset information.")
-        self.aruco_topic = p("aruco_topic", "aruco", "Topic used to receive aruco tag information (ID + relative direction of the robot to the tag's top).")
-        self.line_turning_topic = p("line_turning_topic", "line_turning", "Topic used to receive information about line visibility in each third of the camera.")
-        self.user_cmd_topic = p("user_cmd_topic", "user_cmd", "Topic used to receive route nodes from the user.")
-        self.twist_topic = p("twist_topic", "cmd_vel", "Topic used to send twist messages.")
-        self.route_service = p("route_service", "generate_route", "Service used to generate robot's grid route.")
-        self.dims_service = p("dims_service", "get_dims", "Service used to obtain robot's grid dimensions.")
+        self.line_offset_topic = p(
+            "line_offset_topic",
+            "line_offset",
+            "Topic used to receive line_offset information.",
+        )
+        self.aruco_topic = p(
+            "aruco_topic",
+            "aruco",
+            "Topic used to receive aruco tag information (ID + relative direction of the robot to the tag's top).",
+        )
+        self.line_turning_topic = p(
+            "line_turning_topic",
+            "line_turning",
+            "Topic used to receive information about line visibility in each third of the camera.",
+        )
+        self.user_cmd_topic = p(
+            "user_cmd_topic",
+            "user_cmd",
+            "Topic used to receive route nodes from the user.",
+        )
+        self.twist_topic = p(
+            "twist_topic", "cmd_vel", "Topic used to send twist messages."
+        )
+        self.route_topic = p(
+            "route_topic", "current_route", "Topic used to publish the active route."
+        )
+        self.route_service = p(
+            "route_service",
+            "generate_route",
+            "Service used to generate robot's grid route.",
+        )
+        self.dims_service = p(
+            "dims_service",
+            "get_dims",
+            "Service used to obtain robot's grid dimensions.",
+        )
 
         # Start state
         self.curr_pos = p("start_pos", "A1", "Default starting position of the robot.")
         self.curr_dir = gridbot.ArucoDirection[
-            str(p("start_dir", "north", "Default starting rotation of the robot.")).upper()
+            str(
+                p("start_dir", "north", "Default starting rotation of the robot.")
+            ).upper()
         ]
 
         # Timing
-        self.timer_period = p("timer_period", 0.005, "Timer period of the robot's state machine.", min_value=0.0)
-        self.pause_duration = p("pause_duration", 1.0, "Duration (in seconds) to pause the robot for after reaching a node/turning correctly.", min_value=0.0)
+        self.timer_period = p(
+            "timer_period",
+            0.005,
+            "Timer period of the robot's state machine.",
+            min_value=0.0,
+        )
+        self.pause_duration = p(
+            "pause_duration",
+            1.0,
+            "Duration (in seconds) to pause the robot for after reaching a node/turning correctly.",
+            min_value=0.0,
+        )
 
         # PID
         self.pid = PID(
-            p("k_p", 1.0, "Factor for the proportional part of the PID controller.", min_value=0.0),
-            p("k_i", 0.0, "Factor for the integral part of the PID controller.", min_value=0.0),
-            p("k_d", 0.0, "Factor for the derivative part of the PID controller.", min_value=0.0),
+            p(
+                "k_p",
+                1.0,
+                "Factor for the proportional part of the PID controller.",
+                min_value=0.0,
+            ),
+            p(
+                "k_i",
+                0.0,
+                "Factor for the integral part of the PID controller.",
+                min_value=0.0,
+            ),
+            p(
+                "k_d",
+                0.0,
+                "Factor for the derivative part of the PID controller.",
+                min_value=0.0,
+            ),
         )
 
         # Velocities
-        self.linear_vel = p("linear_vel", 0.15, "Normalized forward speed (0..1).", min_value=0.0, max_value=1.0)
-        self.angular_vel = p("angular_vel", 0.3, "Normalized turning speed (0..1).", min_value=0.0, max_value=1.0)
-        
+        self.linear_vel = p(
+            "linear_vel",
+            0.15,
+            "Normalized forward speed (0..1).",
+            min_value=0.0,
+            max_value=1.0,
+        )
+        self.angular_vel = p(
+            "angular_vel",
+            0.3,
+            "Normalized turning speed (0..1).",
+            min_value=0.0,
+            max_value=1.0,
+        )
 
         gridbot.log_params(self)
 

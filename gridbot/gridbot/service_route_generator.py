@@ -287,7 +287,6 @@ class RouteGenerator(Node):
             return self.cost <= other.cost
 
         def __eq__(self, other):
-            print(type(other))
             return (self.name, self.direction) == (other.name, other.direction)
 
         def __hash__(self):
@@ -339,8 +338,8 @@ class RouteGenerator(Node):
 
                 tentative_g_score = g_score[curr_cell] + n_weight + turn_penalty
 
-                self.get_logger().info(
-                    f"[{curr_cell.name}]'s neighbor: {n_name}, weight: {n_weight}, turn penalty: {turn_penalty}\nCalculated g score: {tentative_g_score}"
+                self.get_logger().debug(
+                    f"[{curr_cell.name}]'s neighbor: {n_name}, weight: {n_weight}, turn penalty: {turn_penalty}, g score: {tentative_g_score}"
                 )
 
                 if tentative_g_score < g_score[n_cell]:

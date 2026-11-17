@@ -121,7 +121,7 @@
         "gridbot.distance_measurer": {
           "visible": false
         },
-        "gridbot.test_evaluator": {
+        "gridbot.route_evaluator": {
           "visible": false
         },
         "rosbag2_recorder": {
@@ -216,7 +216,7 @@
         "gridbot.distance_measurer": {
           "visible": false
         },
-        "gridbot.test_evaluator": {
+        "gridbot.route_evaluator": {
           "visible": false
         },
         "rosbag2_recorder": {
@@ -311,7 +311,7 @@
         "gridbot.camera_controller": {
           "visible": false
         },
-        "gridbot.test_evaluator": {
+        "gridbot.route_evaluator": {
           "visible": false
         },
         "rosbag2_recorder": {

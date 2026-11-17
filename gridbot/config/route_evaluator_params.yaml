@@ -3,11 +3,7 @@
     run_id: 0
     route_name: ""
     route_difficulty: 0
-    # 3 routes: easy, medium, hard
-    # each string is a full user command (space-separated node names)
     user_commands:
-      - "H7 A1"
-      - "M6 H12 B10 A1"
       - "G1 L3 M6 K9 E13 A8 C4 A1"
 
     lost_timeout: 30.0

@@ -3,7 +3,7 @@
     yaml_save_path: "ros2_ws/src/gridbot/config"
     map_img_save_path: "ros2_ws/src/gridbot/assets/models/grid"
     markers_print_path: "ros2_ws/src/gridbot/assets/print"
-    map_service_name: "generate_map"
+    map_service_name: "generate_map "
 
     image_length: 4096
     marker_desired_cm: 8.5

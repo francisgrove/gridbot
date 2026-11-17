@@ -1,18 +1,21 @@
 from functools import partial
 
+import cv2
+import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from rcl_interfaces.srv import GetParameters
+from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import Float64, String
 from builtin_interfaces.msg import Duration
 
 import gridbot.gridbot_helpers as gridbot
-from gridbot_interfaces.msg import SimpleAruco, RouteRunMetadata, RouteStepResult
-from gridbot_interfaces.srv import GenerateRoute, GetDims
+from gridbot_interfaces.msg import SimpleAruco, StampedRoute, RouteRunMetadata, RouteStepResult
+from gridbot_interfaces.srv import GetDims
 
 
-class TestEvaluator(Node):
+class RouteEvaluator(Node):
 
     def __init__(self, node_name: str):
         super().__init__(node_name)
@@ -25,23 +28,27 @@ class TestEvaluator(Node):
             depth=1,
         )
 
-        observer_qos = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=5,
-        )
-
         self.aruco_sub = self.create_subscription(
-            SimpleAruco, self.aruco_topic, self.aruco_callback, observer_qos
+            SimpleAruco, self.aruco_topic, self.aruco_callback, qos
         )
 
         self.line_offset_sub = self.create_subscription(
-            Float64, self.line_offset_topic, self.line_offset_callback, observer_qos
+            Float64, self.line_offset_topic, self.line_offset_callback, qos
+        )
+
+        self.route_sub = self.create_subscription(
+            StampedRoute, self.route_topic, self.route_callback, qos
+        )
+
+        self.topdown_sub = self.create_subscription(
+            Image, self.topdown_topic, self.topdown_callback, qos
         )
 
         self.user_cmd_pub = self.create_publisher(String, self.user_cmd_topic, qos)
         self.metadata_pub = self.create_publisher(RouteRunMetadata, self.metadata_topic, qos)
         self.step_result_pub = self.create_publisher(RouteStepResult, self.step_result_topic, qos)
+
+        self.latest_topdown: CompressedImage | None = None
 
         self.deviations: list[float] = []
         self.step_start_time = None
@@ -50,6 +57,7 @@ class TestEvaluator(Node):
         self.expected_route: list[str] = []
         self.total_steps = 0
         self.route_active = False
+        self.awaiting_route = False
         self.run_complete = False
 
         self.param_clients = {
@@ -64,11 +72,8 @@ class TestEvaluator(Node):
             ),
         }
 
-        self.route_client = self.create_client(
-            GenerateRoute, f"{self.get_namespace()}/route_generator/generate_route"
-        )
         self.dims_client = self.create_client(
-            GetDims, f"{self.get_namespace()}/route_generator/get_dims"
+            GetDims, f"{self.get_namespace()}/get_dims"
         )
 
         self.graph_height = None
@@ -79,8 +84,8 @@ class TestEvaluator(Node):
         self.collected_params = {}
         self.params_ready = False
         self.metadata_published = False
-        self.awaiting_route = False
 
+        self._log_prefix = f"[{self.run_id}]"
         self.create_timer(2.0, self.startup_tick)
 
     def startup_tick(self):
@@ -100,14 +105,14 @@ class TestEvaluator(Node):
             self.metadata_published = True
 
         if not self.route_active and not self.awaiting_route and self.current_cmd_idx < len(self.user_commands):
-            self.request_route()
+            self.send_next_command()
 
     def fetch_dims(self):
         if self._dims_pending:
             return
 
         if not self.dims_client.service_is_ready():
-            self.get_logger().info("Waiting for GetDims service...")
+            self.get_logger().info(f"{self._log_prefix} Waiting for GetDims service...")
             return
 
         self._dims_pending = True
@@ -122,10 +127,10 @@ class TestEvaluator(Node):
             self.graph_height = result.graph_height
             self.dims_ready = True
             self.get_logger().info(
-                f"Graph dimensions: {self.graph_width} x {self.graph_height}"
+                f"{self._log_prefix} Graph dimensions: {self.graph_width} x {self.graph_height}"
             )
         except Exception as e:
-            self.get_logger().error(f"GetDims call failed: {e}")
+            self.get_logger().error(f"{self._log_prefix} GetDims call failed: {e}")
 
     def fetch_remote_params(self):
         params_to_fetch = {
@@ -134,6 +139,8 @@ class TestEvaluator(Node):
             ],
             "grid_processor": [
                 "centerline_node_offset", "centerline_step", "line_roi_height",
+                "centerline_roi_width", "aruco_roi_width", "aruco_roi_height",
+                "aruco_padding",
             ],
             "route_generator": [
                 "turn_penalty_factor",
@@ -143,7 +150,7 @@ class TestEvaluator(Node):
         for node_name, param_names in params_to_fetch.items():
             client = self.param_clients[node_name]
             if not client.service_is_ready():
-                self.get_logger().info(f"Waiting for {node_name} parameter service...")
+                self.get_logger().info(f"{self._log_prefix} Waiting for {node_name} parameter service...")
                 return
 
             if node_name in self.collected_params:
@@ -171,9 +178,9 @@ class TestEvaluator(Node):
                 elif val.type == 4:  # STRING
                     params[name] = val.string_value
             self.collected_params[node_name] = params
-            self.get_logger().info(f"Fetched params from {node_name}: {params}")
+            self.get_logger().info(f"{self._log_prefix} Fetched params from {node_name}: {params}")
         except Exception as e:
-            self.get_logger().error(f"Failed to fetch params from {node_name}: {e}")
+            self.get_logger().error(f"{self._log_prefix} Failed to fetch params from {node_name}: {e}")
 
     def publish_metadata(self):
         nav = self.collected_params.get("route_navigator", {})
@@ -188,65 +195,67 @@ class TestEvaluator(Node):
 
         msg.linear_vel = float(nav.get("linear_vel", 0.0))
         msg.angular_vel = float(nav.get("angular_vel", 0.0))
-        msg.centerline_node_offset = int(gp.get("centerline_node_offset", 0))
-        msg.centerline_step = int(gp.get("centerline_step", 0))
-        msg.line_roi_height = float(gp.get("line_roi_height", 0.0))
-        msg.turn_penalty_factor = float(rg.get("turn_penalty_factor", 0.0))
         msg.k_p = float(nav.get("k_p", 0.0))
         msg.k_i = float(nav.get("k_i", 0.0))
         msg.k_d = float(nav.get("k_d", 0.0))
 
+        msg.centerline_node_offset = int(gp.get("centerline_node_offset", 0))
+        msg.centerline_step = int(gp.get("centerline_step", 0))
+        msg.line_roi_height = float(gp.get("line_roi_height", 0.0))
+        msg.centerline_roi_width = float(gp.get("centerline_roi_width", 0.0))
+        msg.aruco_roi_width = float(gp.get("aruco_roi_width", 0.0))
+        msg.aruco_roi_height = float(gp.get("aruco_roi_height", 0.0))
+        msg.aruco_padding = int(gp.get("aruco_padding", 0))
+
+        msg.turn_penalty_factor = float(rg.get("turn_penalty_factor", 0.0))
+
         self.metadata_pub.publish(msg)
-        self.get_logger().info(f"Published run metadata for run_id={self.run_id}")
+        self.get_logger().info(f"{self._log_prefix} Published run metadata")
 
-    def request_route(self):
+    def send_next_command(self):
         cmd = self.user_commands[self.current_cmd_idx]
-        nodes = [self.curr_pos] + [node for node in cmd.split()]
-
-        if not self.route_client.service_is_ready():
-            self.get_logger().info("GenerateRoute service not available.")
-            return
+        self.get_logger().info(
+            f"{self._log_prefix} Sending command {self.current_cmd_idx + 1}/{len(self.user_commands)}: {cmd}"
+        )
 
         self.awaiting_route = True
 
-        self.route_request = GenerateRoute.Request()
-        self.route_request.user_nodes = nodes
-        self.route_request.looking_dir = self.curr_dir.value
+        msg = String()
+        msg.data = cmd
+        self.user_cmd_pub.publish(msg)
+
+    def route_callback(self, msg: StampedRoute):
+        if self.run_complete:
+            return
+
+        new_route = [node.name for node in msg.route]
+
+        if self.route_active:
+            self.get_logger().info(
+                f"{self._log_prefix} Route updated: {' -> '.join(new_route)} "
+                f"({len(new_route)} steps)"
+            )
+            self.expected_route = new_route
+            self.total_steps = len(new_route)
+            self.current_step = 0
+            self.deviations.clear()
+            self.step_start_time = self.get_clock().now()
+            return
+
+        self.awaiting_route = False
+
+        self.expected_route = new_route
+        self.total_steps = len(new_route)
 
         self.get_logger().info(
-            f"Requesting route {self.current_cmd_idx + 1}/{len(self.user_commands)}: {cmd}"
+            f"{self._log_prefix} Route received: {' -> '.join(self.expected_route)} "
+            f"({self.total_steps} steps)"
         )
-
-        future = self.route_client.call_async(self.route_request)
-        future.add_done_callback(self.on_route_response)
-
-    def on_route_response(self, future):
-        self.awaiting_route = False
-        try:
-            result = future.result()
-            self.expected_route = [node.name for node in result.route]
-            self.total_steps = len(self.expected_route)
-
-            self.get_logger().info(
-                f"Route received: {' -> '.join(self.expected_route)} "
-                f"({len(self.expected_route)} steps)"
-            )
-
-            self.start_route()
-        except Exception as e:
-            self.get_logger().error(f"GenerateRoute call failed: {e}")
-
-    def start_route(self):
-        cmd = self.user_commands[self.current_cmd_idx]
 
         self.current_step = 0
         self.deviations.clear()
         self.route_active = True
         self.step_start_time = self.get_clock().now()
-
-        msg = String()
-        msg.data = cmd
-        self.user_cmd_pub.publish(msg)
 
     def aruco_callback(self, msg: SimpleAruco):
         if not self.route_active or not self.expected_route:
@@ -288,9 +297,12 @@ class TestEvaluator(Node):
         else:
             result.status = RouteStepResult.STATUS_WRONG_FIELD
 
+        if self.latest_topdown is not None:
+            result.topdown_image = self.latest_topdown
+
         self.step_result_pub.publish(result)
         self.get_logger().info(
-            f"Step {result.step_number}: status={result.status} "
+            f"{self._log_prefix} Step {result.step_number}: status={result.status} "
             f"expected={expected_node} actual={received_node}"
         )
 
@@ -299,6 +311,23 @@ class TestEvaluator(Node):
 
         if result.status == RouteStepResult.STATUS_COMPLETED:
             self.route_finished()
+
+    def topdown_callback(self, msg: Image):
+        h, w = msg.height, msg.width
+        if msg.encoding == "rgb8":
+            frame = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w, 3)
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        elif msg.encoding == "bgr8":
+            frame = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w, 3)
+        else:
+            frame = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w, -1)
+
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+        compressed = CompressedImage()
+        compressed.header = msg.header
+        compressed.format = "jpeg"
+        compressed.data = buf.tobytes()
+        self.latest_topdown = compressed
 
     def line_offset_callback(self, msg: Float64):
         if self.route_active:
@@ -314,7 +343,7 @@ class TestEvaluator(Node):
             return
 
         self.get_logger().warn(
-            f"Lost timeout ({self.lost_timeout}s) exceeded at step {self.current_step}"
+            f"{self._log_prefix} Lost timeout ({self.lost_timeout}s) exceeded at step {self.current_step}"
         )
         self.publish_lost_result()
 
@@ -344,6 +373,9 @@ class TestEvaluator(Node):
             result.min_deviation_px = min(self.deviations)
             result.max_deviation_px = max(self.deviations)
 
+        if self.latest_topdown is not None:
+            result.topdown_image = self.latest_topdown
+
         self.step_result_pub.publish(result)
         self.route_finished()
 
@@ -352,13 +384,13 @@ class TestEvaluator(Node):
         self.current_cmd_idx += 1
 
         if self.current_cmd_idx >= len(self.user_commands):
-            self.get_logger().info("All routes completed. Evaluator done. Shutting down.")
+            self.get_logger().info(f"{self._log_prefix} All routes completed. Evaluator done. Shutting down.")
             self.run_complete = True
             self.destroy_node()
             rclpy.try_shutdown()
         else:
             self.get_logger().info(
-                f"Route done. Next: {self.current_cmd_idx + 1}/{len(self.user_commands)}"
+                f"{self._log_prefix} Route done. Next: {self.current_cmd_idx + 1}/{len(self.user_commands)}"
             )
 
     def _setup_parameters(self):
@@ -382,8 +414,10 @@ class TestEvaluator(Node):
         self.aruco_topic = p("aruco_topic", "aruco", "Topic to receive aruco detections.")
         self.line_offset_topic = p("line_offset_topic", "line_offset", "Topic to receive line offset.")
         self.user_cmd_topic = p("user_cmd_topic", "user_cmd", "Topic to send user commands to route_navigator.")
+        self.route_topic = p("route_topic", "current_route", "Topic to receive the active route from route_navigator.")
         self.metadata_topic = p("metadata_topic", "run_metadata", "Topic to publish run metadata.")
         self.step_result_topic = p("step_result_topic", "step_result", "Topic to publish step results.")
+        self.topdown_topic = p("topdown_topic", "map_topdown", "Topic to receive topdown camera images.")
 
         self.create_timer(1.0, self.check_lost_timeout)
 
@@ -391,10 +425,10 @@ class TestEvaluator(Node):
 
 
 def main(args=None):
-    node_name = "test_evaluator"
+    node_name = "route_evaluator"
     print(f"Hi from {node_name}.")
     rclpy.init(args=args)
-    node = TestEvaluator(node_name)
+    node = RouteEvaluator(node_name)
     rclpy.spin(node)
     if rclpy.ok():
         node.destroy_node()
