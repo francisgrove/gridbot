@@ -1,0 +1,45 @@
+/**:
+  ros__parameters:
+    yaml_save_path: "/home/francis/ros2_ws/src/gridbot/config"
+    map_img_save_path: "/home/francis/ros2_ws/src/gridbot/assets/models/grid"
+    markers_print_path: "/home/francis/ros2_ws/src/gridbot/assets/print"
+    map_service_name: "generate_map"
+
+    image_length: 4096
+    marker_desired_cm: 8.5
+    marker_scale: 10
+    text_size: 25
+    line_color: [0, 0, 255]
+    marker_distance: 100
+    line_thickness: 4
+
+    border_padding: 200
+    text_padding: 100
+
+    graph_width: 4
+    graph_height: 3
+    
+    use_weights: false
+
+    removed_nodes:
+      - "A3"
+      - "B1"
+      - "C2"
+      - "D3"
+
+    edges:
+      # column A
+      - "A1,A2,1"
+      # column B
+      - "B2,B3,1"
+      # column C
+      - "C1,C3,2"
+      # column D
+      - "D1,D2,1"
+      # row 1
+      - "A1,C1,2"
+      - "C1,D1,1"
+      # row 2
+      - "A2,B2,1"
+      # row 3
+      - "B3,C3,1"

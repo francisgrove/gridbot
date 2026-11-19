@@ -38,7 +38,7 @@ def launch_setup(context):
                 cmd=[
                     FindExecutable(name="ros2"),
                     "service", "call",
-                    f"/{pkg_name}/map_generator/generate_map",
+                    f"/{pkg_name}/generate_map",
                     "gridbot_interfaces/srv/GenerateMap",
                     f"{{map_name: '{graph_name}', overwrite: {overwrite}}}",
                 ],
