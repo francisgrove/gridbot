@@ -19,6 +19,6 @@
     # wheel_separation: 0.08382
 
     min_pwm: 0.3
-    vel_multiplier: 0.5
+    vel_multiplier: 0.65
 
-    invert_direction: true
+    invert_direction: false
