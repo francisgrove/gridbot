@@ -49,6 +49,22 @@ def launch_setup(context):
 
     camera_name = "camera"
 
+    image_decompressor = Node(
+        package="image_transport",
+        executable="republish",
+        name="image_decompressor",
+        namespace=pkg_name,
+        arguments=["compressed", "raw"],
+        parameters=[{
+            "in_transport": "compressed",
+            "out_transport": "raw",
+        }],
+        remappings=[
+            ("in/compressed", f"{camera_name}/image_raw/compressed"),
+            ("out", f"{camera_name}/image_decompressed"),
+        ],
+    )
+
     composable_nodes = [
         ComposableNode(
             package="image_proc",
@@ -56,7 +72,7 @@ def launch_setup(context):
             name="rectify_node",
             namespace=pkg_name,
             remappings=[
-                ("image", f"{camera_name}/cam_image_raw"),
+                ("image", f"{camera_name}/image_raw"),
                 ("image_rect", f"{camera_name}/image_rect"),
             ],
         ),
@@ -88,7 +104,8 @@ def launch_setup(context):
         composable_node_descriptions=composable_nodes,
     )
 
-    return [route_generator, image_proc_container]
+    # return [route_generator, image_decompressor, image_proc_container]
+    return [route_generator, image_decompressor]
 
 
 def generate_launch_description():
@@ -130,9 +147,6 @@ def generate_launch_description():
         namespace=pkg_name,
         output="screen",
         parameters=[grid_processor_config],
-        remappings=[
-            ("image_raw", "image_downsized")
-        ]
     )
 
     route_navigator = Node(

@@ -284,6 +284,7 @@ class RouteNavigator(Node):
         twist_msg = Twist()
 
         if not self.robot_route:
+            self.twist_pub.publish(twist_msg)
             return
 
         next_state = None

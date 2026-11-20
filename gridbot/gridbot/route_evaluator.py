@@ -139,8 +139,8 @@ class RouteEvaluator(Node):
             ],
             "grid_processor": [
                 "centerline_node_offset", "centerline_step", "line_roi_height",
-                "centerline_roi_width", "aruco_roi_width", "aruco_roi_height",
-                "aruco_padding",
+                "line_roi_width", "aruco_roi_width", "aruco_roi_height",
+                "aruco_padding", "line_turning_min_angle",
             ],
             "route_generator": [
                 "turn_penalty_factor",
@@ -202,10 +202,11 @@ class RouteEvaluator(Node):
         msg.centerline_node_offset = int(gp.get("centerline_node_offset", 0))
         msg.centerline_step = int(gp.get("centerline_step", 0))
         msg.line_roi_height = float(gp.get("line_roi_height", 0.0))
-        msg.centerline_roi_width = float(gp.get("centerline_roi_width", 0.0))
+        msg.line_roi_width = float(gp.get("line_roi_width", 0.0))
         msg.aruco_roi_width = float(gp.get("aruco_roi_width", 0.0))
         msg.aruco_roi_height = float(gp.get("aruco_roi_height", 0.0))
         msg.aruco_padding = int(gp.get("aruco_padding", 0))
+        msg.line_turning_min_angle = float(gp.get("line_turning_min_angle", 0.0))
 
         msg.turn_penalty_factor = float(rg.get("turn_penalty_factor", 0.0))
 

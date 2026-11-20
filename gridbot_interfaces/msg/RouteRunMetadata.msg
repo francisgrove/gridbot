@@ -14,10 +14,11 @@ float64 k_d
 int32 centerline_node_offset
 int32 centerline_step
 float64 line_roi_height
-float64 centerline_roi_width
+float64 line_roi_width
 float64 aruco_roi_width
 float64 aruco_roi_height
 int32 aruco_padding
+float64 line_turning_min_angle
 
 # route_generator params
 float64 turn_penalty_factor

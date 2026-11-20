@@ -18,6 +18,7 @@
     # wheel_radius: 0.021
     # wheel_separation: 0.08382
 
+    min_pwm: 0.3
     vel_multiplier: 0.5
 
     invert_direction: true

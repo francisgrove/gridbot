@@ -127,6 +127,9 @@ class RouteGenerator(Node):
             self.get_logger().debug(f"A* calculated path: {path}")
             paths_2d.append(path)
 
+            if len(path) >= 2:
+                self.looking_dir = self._get_direction_between(path[-2], path[-1])
+
         paths_1d = [node for path in paths_2d for node in path]
         path = [node for node, _ in groupby(paths_1d)]
 

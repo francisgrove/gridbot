@@ -29,7 +29,7 @@ class GridProcessor(Node):
     line_turning_topic: str
     line_color_hsv: list
     line_roi_height: float
-    centerline_roi_width: int
+    line_roi_width: int
 
     aruco_roi_width: int
     aruco_roi_height: float
@@ -79,12 +79,15 @@ class GridProcessor(Node):
 
         aruco_params = cv2.aruco.DetectorParameters()
 
-        aruco_params.minMarkerPerimeterRate = 0.5
-        aruco_params.polygonalApproxAccuracyRate = 0.01
-        aruco_params.minCornerDistanceRate = 0.1
+        aruco_params.minMarkerPerimeterRate = 0.35
+        aruco_params.polygonalApproxAccuracyRate = 0.05
+        aruco_params.minCornerDistanceRate = 0.03
         aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         aruco_params.cornerRefinementWinSize = 5
         aruco_params.cornerRefinementMaxIterations = 40
+        aruco_params.adaptiveThreshWinSizeMin = 3
+        aruco_params.adaptiveThreshWinSizeMax = 30
+        aruco_params.adaptiveThreshWinSizeStep = 5
 
         self.detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
 
@@ -104,8 +107,14 @@ class GridProcessor(Node):
             depth=1,
         )
 
+        camera_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+
         self.camera_sub = self.create_subscription(
-            Image, self.camera_topic, self.image_callback, qos_profile=qos
+            Image, self.camera_topic, self.image_callback, qos_profile=camera_qos
         )
         self.line_offset_pub = self.create_publisher(
             Float64, self.line_offset_topic, qos_profile=qos
@@ -129,10 +138,10 @@ class GridProcessor(Node):
         self._handler = ParameterEventHandler(self)
 
         for parameter_name in (
-            "h_thresh_low",
+            "h_low",
             "s_low",
             "v_low",
-            "h_thresh_high",
+            "h_high",
             "s_high",
             "v_high",
             "line_color_hsv",
@@ -150,7 +159,6 @@ class GridProcessor(Node):
             self.get_logger().error("Error while trying to read frame.")
             return
 
-        # in case image resolution changes (shouldn't, but...), update ROIs
         h, w = frame_raw.shape[:2]
         if self.img_w != w or self.img_h != h:
             self.img_w = w
@@ -165,6 +173,10 @@ class GridProcessor(Node):
 
         crop_mask = self._get_mask_from_color(img=color_crop, color_hsv=self.line_color_hsv)
         self._color_mask_buf[self._color_roi_y_start :] = crop_mask
+
+        line_cv = bridge.cv2_to_compressed_imgmsg(self._color_mask_buf)
+
+        self.line_mask_pub.publish(line_cv)
 
         centerline, target_node = self._line_tracking(self._color_mask_buf)
         self._turning_tracking(self._color_mask_buf)
@@ -564,7 +576,7 @@ class GridProcessor(Node):
         self.get_logger().info("Setting up ROI limits.")
 
         height_px = int(self.img_h * self.line_roi_height)
-        center_width_px = int(self.img_w * self.centerline_roi_width)
+        center_width_px = int(self.img_w * self.line_roi_width)
 
         aruco_height_px = int(self.img_h * self.aruco_roi_height)
         aruco_width_px = int(self.img_w * self.aruco_roi_width)
@@ -803,10 +815,10 @@ class GridProcessor(Node):
             min_value=0.0,
             max_value=1.0,
         )
-        self.centerline_roi_width = p(
-            "centerline_roi_width",
+        self.line_roi_width = p(
+            "line_roi_width",
             0.4,
-            "Width of the central line search ROI - [0..1] factor.",
+            "Width of the line search ROI - [0..1] factor.",
             min_value=0.0,
             max_value=1.0,
         )
@@ -855,14 +867,14 @@ class GridProcessor(Node):
 
         # HSV thresholds
         self.h_low = p(
-            "h_thresh_low",
+            "h_low",
             0,
             "Lower bound of the hue threshold for line detection.",
             min_value=0,
             max_value=179,
         )
         self.h_high = p(
-            "h_thresh_high",
+            "h_high",
             0,
             "Upper bound of the hue threshold for line detection.",
             min_value=0,

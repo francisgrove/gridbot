@@ -19,5 +19,5 @@
     k_i: 0.0
     k_d: 0.0
 
-    linear_vel: 0.06
+    linear_vel: 0.15
     angular_vel: 0.5

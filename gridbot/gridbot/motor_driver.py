@@ -113,12 +113,21 @@ class MotorDriver(Node):
             min(self.vel_multiplier * self.right_wheel_mult * right_wheel_vel, 1.0),
         )
 
-        # self.get_logger().info(
-        #     f"Wheel values - Left: {left_val:.4f}, Right: {right_val:.4f}"
-        # )
+        left_val = self._apply_deadband(left_val)
+        right_val = self._apply_deadband(right_val)
+
+        self.get_logger().info(
+            f"Wheel values - Left: {left_val:.4f}, Right: {right_val:.4f}"
+        )
 
         self.left_wheel.value = left_val
         self.right_wheel.value = right_val
+
+    def _apply_deadband(self, val):
+        if val == 0.0:
+            return 0.0
+        sign = 1.0 if val > 0 else -1.0
+        return sign * max(self.min_pwm, abs(val))
 
     def _setup_parameters(self):
         p = partial(gridbot.declare_param, self)
@@ -188,6 +197,13 @@ class MotorDriver(Node):
             1.0,
             "Per-wheel multiplier for the right motor.",
             min_value=0.0,
+        )
+        self.min_pwm = p(
+            "min_pwm",
+            0.0,
+            "Minimum PWM duty cycle for non-zero commands. Values below this are bumped up to overcome motor deadband.",
+            min_value=0.0,
+            max_value=1.0,
         )
         self.frequency = p("frequency", 100.0, "Frequency of the PWM pins.")
         self.invert_direction = p(
